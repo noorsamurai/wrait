@@ -82,6 +82,19 @@ launch, and nothing left behind:
 The one thing that is genuinely external is **WebView2**, which ships as part
 of Windows 11 and Windows 10 21H2+.
 
+The exe links the Universal CRT (`api-ms-win-crt-*`) dynamically. That is an
+operating-system component on Windows 10 and later — the same floor WebView2
+already sets — so it needs no Visual C++ redistributable and nothing to
+install. Verified by parsing the built binary's PE import table, not assumed:
+the only other imports are core Windows libraries (`kernel32`, `user32`,
+`ole32`, `ws2_32` and friends).
+
+Note if you cross-compile from Linux with `cargo-xwin` rather than building on
+Windows: that toolchain *does* emit a `VCRUNTIME140.dll` dependency, which the
+real MSVC build does not. Add `-C target-feature=+crt-static` if you need a
+cross-compiled binary to stand alone. Builds produced on Windows, including
+everything CI publishes, do not need it.
+
 To build it (on a Windows machine, with Rust and the *Desktop development with
 C++* workload installed):
 
