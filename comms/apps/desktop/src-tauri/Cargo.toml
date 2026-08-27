@@ -1,0 +1,33 @@
+[package]
+name = "wrait-comms"
+version = "0.1.0"
+description = "Messaging for the room you work in"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+# Tauri's mobile targets build the app as a library and call into it from a
+# generated Xcode/Gradle entry point, so the desktop binary links this too.
+name = "wrait_comms_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-os = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+# Small binary and low resident memory matter more here than raw speed: the
+# app spends its life idle waiting on a socket.
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
