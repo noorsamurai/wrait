@@ -36,7 +36,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
 
   return (
     <div className="signin">
-      <form className="glass glass--raised signin__card" onSubmit={submit}>
+      <form className="surface surface--raised signin__card" onSubmit={submit}>
         <div className="signin__brand">
           <LogoMark />
           <div>

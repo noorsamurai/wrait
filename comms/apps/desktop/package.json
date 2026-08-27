@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "perf": "node perf/measure-appearance.mjs"
   },
   "dependencies": {
     "@comms/protocol": "workspace:*",

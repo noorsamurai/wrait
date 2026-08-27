@@ -1,0 +1,314 @@
+/*
+ * Visual foundation.
+ *
+ * The default appearance is deliberately flat: no backdrop blur, no animated
+ * backdrop, no specular sweeps. Two reasons.
+ *
+ *   Cost. `backdrop-filter` forces the compositor to snapshot and blur
+ *   whatever sits behind every panel, on every frame it changes, and the old
+ *   animated backdrop ran three large `filter: blur()` layers forever. Flat
+ *   surfaces paint once and then the GPU idles - which is what an app that
+ *   spends its day sitting in the background on an old office PC should do.
+ *
+ *   Clarity. Depth here comes from a hairline border and a restrained
+ *   palette rather than from stacked translucency, so text sits on a known
+ *   solid colour and stays legible.
+ *
+ * Glass is still available as an opt-in for capable machines; everything it
+ * changes is confined to the [data-appearance="glass"] blocks at the bottom.
+ */
+
+:root {
+  color-scheme: dark light;
+
+  --radius-lg: 14px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /*
+   * A warm, desaturated palette. No pure black and no pure white anywhere:
+   * the darkest surface is a soft charcoal and the lightest is a warm
+   * off-white, which is far easier to sit in front of all day than the
+   * high-contrast extremes. Hues are held well below full saturation so
+   * nothing glows.
+   */
+  --bg: #1b1d21;
+  --surface: #232629;
+  --surface-2: #292c31;
+  --surface-3: #33373d;
+
+  --border: rgba(226, 220, 210, 0.10);
+  --border-strong: rgba(226, 220, 210, 0.18);
+
+  --ink: #dcd8d1;
+  --ink-soft: #9a958d;
+  --ink-faint: #6f6a63;
+
+  /* A slate blue dark enough to carry off-white text at 4.75:1. */
+  --accent: #566b87;
+  --accent-hover: #627897;
+  --on-accent: #f2efe9;
+  --accent-soft: rgba(86, 107, 135, 0.20);
+
+  --alert: #b58d5f;
+  --alert-soft: rgba(181, 141, 95, 0.14);
+  --positive: #7c9478;
+  --danger: #b07b7b;
+
+  /* Avatar monograms: one muted hue per person, never a vivid one. */
+  --avatar-sat: 19%;
+  --avatar-light: 40%;
+
+  --knob: #e6e2db;
+
+  --shadow: 0 1px 2px rgba(18, 17, 16, 0.26);
+  --shadow-lifted: 0 10px 28px -12px rgba(18, 17, 16, 0.5);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #e9e6e1;
+    --surface: #f6f4f0;
+    --surface-2: #efece7;
+    --surface-3: #e3dfd8;
+
+    --border: rgba(58, 54, 48, 0.14);
+    --border-strong: rgba(58, 54, 48, 0.24);
+
+    --ink: #34312c;
+    --ink-soft: #6b6660;
+    --ink-faint: #948e86;
+
+    --accent: #5a6f8a;
+    --accent-hover: #4e6179;
+    --on-accent: #f6f4f0;
+    --accent-soft: rgba(90, 111, 138, 0.13);
+
+    --alert: #93703f;
+    --alert-soft: rgba(147, 112, 63, 0.12);
+    --positive: #5e7a5b;
+    --danger: #96605f;
+
+    --avatar-sat: 20%;
+    --avatar-light: 47%;
+
+    --knob: #f6f4f0;
+
+    --shadow: 0 1px 2px rgba(58, 54, 48, 0.08);
+    --shadow-lifted: 0 10px 28px -14px rgba(58, 54, 48, 0.22);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+    "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  /* iOS: keep content clear of the notch and the home indicator. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* The backdrop. A flat fill by default - one paint, then nothing. */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* Only the glass appearance uses these. */
+.ambient span { display: none; }
+
+/* ------------------------------------------------------------------ */
+/* Surfaces                                                            */
+/* ------------------------------------------------------------------ */
+
+.surface {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.surface--raised {
+  box-shadow: var(--shadow-lifted);
+}
+
+/* ------------------------------------------------------------------ */
+/* Controls                                                            */
+/* ------------------------------------------------------------------ */
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.14s var(--ease), border-color 0.14s var(--ease);
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.btn:active:not(:disabled) { background: var(--surface-3); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+
+.btn--primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: transparent;
+}
+
+.btn--icon {
+  padding: 0;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+}
+
+.field {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+  transition: border-color 0.14s var(--ease);
+}
+
+.field::placeholder { color: var(--ink-faint); }
+.field:focus { border-color: var(--accent); }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Scrollbars: thin and unobtrusive rather than the platform default slab. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Optional glass appearance                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Everything expensive lives here and nowhere else, so the default costs
+ * nothing to render and turning this on is a single attribute change.
+ */
+:root[data-appearance="glass"] {
+  --bg: #191b20;
+  --surface: rgba(236, 232, 224, 0.07);
+  --surface-2: rgba(236, 232, 224, 0.09);
+  --surface-3: rgba(236, 232, 224, 0.14);
+  --border: rgba(236, 232, 224, 0.13);
+  --border-strong: rgba(236, 232, 224, 0.22);
+  --radius-lg: 22px;
+  --radius-md: 14px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-appearance="glass"] {
+    --bg: #e4e1da;
+    --surface: rgba(246, 244, 240, 0.62);
+    --surface-2: rgba(246, 244, 240, 0.5);
+    --surface-3: rgba(246, 244, 240, 0.82);
+    --border: rgba(246, 244, 240, 0.8);
+  }
+}
+
+:root[data-appearance="glass"] .surface,
+:root[data-appearance="glass"] .btn {
+  backdrop-filter: blur(24px) saturate(125%);
+  -webkit-backdrop-filter: blur(24px) saturate(125%);
+}
+
+:root[data-appearance="glass"] .surface {
+  box-shadow: inset 0 1px 0 rgba(236, 232, 224, 0.16), 0 20px 50px -22px rgba(18, 17, 16, 0.55);
+}
+
+:root[data-appearance="glass"] .ambient span {
+  display: block;
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.4;
+}
+
+:root[data-appearance="glass"] .ambient span:nth-child(1) {
+  width: 46vw; height: 46vw; top: -8%; left: -6%;
+  background: radial-gradient(circle, #6a7ea0, transparent 70%);
+}
+:root[data-appearance="glass"] .ambient span:nth-child(2) {
+  width: 40vw; height: 40vw; top: 32%; right: -10%;
+  background: radial-gradient(circle, #8f7a9b, transparent 70%);
+}
+:root[data-appearance="glass"] .ambient span:nth-child(3) {
+  width: 38vw; height: 38vw; bottom: -12%; left: 26%;
+  background: radial-gradient(circle, #6f948e, transparent 70%);
+}
+
+/* Someone who asked the OS for less transparency gets the flat surfaces back
+   even if they turned glass on. */
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-appearance="glass"] .surface,
+  :root[data-appearance="glass"] .btn {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}

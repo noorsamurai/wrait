@@ -70,7 +70,7 @@ export function Roster({
   }, [users, self.id, query, unread, threads]);
 
   return (
-    <aside className="glass roster" data-hidden={hidden}>
+    <aside className="surface roster" data-hidden={hidden}>
       <div className="roster__head">
         <h1 className="roster__title">Office</h1>
         <span

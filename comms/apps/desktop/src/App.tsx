@@ -93,7 +93,7 @@ export function App() {
             onBack={() => comms.openConversation(null)}
           />
         ) : (
-          <section className="glass chat chat--placeholder">
+          <section className="surface chat chat--placeholder">
             <p className="chat__empty">
               {comms.connected
                 ? "Pick someone on the left to start a conversation."

@@ -175,27 +175,57 @@ server already holds, and only one chunk is ever resident in memory — a 1 GB
 transfer costs the same RAM as a 1 MB one. Downloads are authorized: only the
 sender and the named recipient can fetch a file. Limit is 2 GB.
 
-**Low-memory mode.** Backdrop blur is the most expensive thing this UI does and
-it is recomposited every frame. Settings → *Reduce visual effects* drops the
-blur, the animated backdrop and the specular sweep, keeping the layout and the
-palette. The OS-level `prefers-reduced-transparency` and
-`prefers-reduced-motion` settings are honoured too.
+**Rendering cost.** The default appearance is flat by design — no backdrop
+blur, no animated backdrop, no specular sweeps. Surfaces paint once and then
+the GPU idles, which is what an app that sits in the background all day on an
+old office PC should do.
+
+Glass is available as an opt-in under Settings → *Glass appearance*, and
+everything expensive is confined to the `[data-appearance="glass"]` blocks in
+one stylesheet. Measured with `pnpm --filter @comms/desktop perf`, which samples
+frame times while scrolling a full message log:
+
+| | mean frame | p95 | worst | elements with `backdrop-filter` |
+|---|---|---|---|---|
+| **flat** (default) | **16.7 ms** — a locked 60 fps | 16.8 ms | 16.8 ms | 0 |
+| glass (opt-in) | 38.2 ms — about 26 fps | 50.1 ms | 133.3 ms | 8 |
+
+Those figures come from headless Chromium in a container without GPU
+acceleration, so treat the absolute numbers as a worst case rather than a
+prediction for your hardware — but the flat path held a perfect frame budget
+where glass dropped better than half its frames, and a weak office PC is much
+closer to the worst case than to a developer's machine.
+
+The OS-level `prefers-reduced-transparency` and `prefers-reduced-motion`
+settings are honoured on top of whichever appearance is selected.
 
 ## The look
 
-The glass is built from portable CSS primitives rather than Apple's native
-material, which is only available to recent SwiftUI. That means it renders the
-same on WKWebView and WebView2. The recipe is in
-[`src/styles/glass.css`](apps/desktop/src/styles/glass.css): a blurred,
-saturation-boosted backdrop sample; a bright specular rim along the top edge;
-a very soft oversized drop shadow; large corner radii; and a slowly drifting
-coloured backdrop for the glass to pick colour from.
+Flat, quiet and text-first. Depth comes from a hairline border rather than
+stacked translucency, so text always sits on a known solid colour.
+
+The palette is warm and desaturated, with **no pure white and no pure black
+anywhere** — the darkest surface is a soft charcoal and the lightest a warm
+off-white, which is much easier to sit in front of all day than the
+high-contrast extremes. Hues are held well below full saturation so nothing
+glows: the accent is a dusty slate blue, alerts are a muted ochre marked by a
+solid edge and a label rather than by a glow, and avatar monograms get one
+low-saturation hue each. Accent colour is spent only where it earns its place —
+your own messages, the unread badge, the focused field.
+
+Contrast was checked rather than eyeballed: the accent carries its off-white
+text at 4.75:1, above the 4.5:1 WCAG AA threshold for body text.
+
+All of it is tokens in
+[`src/styles/theme.css`](apps/desktop/src/styles/theme.css); the optional glass
+appearance is a block at the bottom of that one file, so switching between them
+changes a single attribute on `<html>`.
 
 Dark and light are both supported, following the OS setting.
 
-| Sign in | Settings | Reduced effects |
+| Sign in | Settings | Glass (opt-in) |
 |---|---|---|
-| ![](apps/desktop/screenshots/01-sign-in.png) | ![](apps/desktop/screenshots/03-settings.png) | ![](apps/desktop/screenshots/04-reduced-effects.png) |
+| ![](apps/desktop/screenshots/01-sign-in.png) | ![](apps/desktop/screenshots/03-settings.png) | ![](apps/desktop/screenshots/04-glass-appearance.png) |
 
 On iPhone the two panes collapse to one: the roster is the root screen and a
 conversation slides over it.

@@ -80,7 +80,7 @@ export function Conversation({
 
   return (
     <section
-      className="glass chat"
+      className="surface chat"
       data-dropping={dropping}
       onDragOver={(e) => {
         // Only react to an actual file drag, not text selections.

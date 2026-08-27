@@ -6,11 +6,14 @@ export interface Settings {
   volume: number;
   /** Raise an OS notification when the window is not focused. */
   notifications: boolean;
-  /** Drop the blur and the animated backdrop on weaker machines. */
-  effects: "full" | "reduced";
+  /**
+   * "flat" is the default and costs nothing to render. "glass" turns on the
+   * backdrop blur and the coloured backdrop, for machines that can spare it.
+   */
+  appearance: "flat" | "glass";
 }
 
-const DEFAULTS: Settings = { sound: true, volume: 0.7, notifications: true, effects: "full" };
+const DEFAULTS: Settings = { sound: true, volume: 0.7, notifications: true, appearance: "flat" };
 const KEY = "comms.settings";
 
 function load(): Settings {
@@ -32,7 +35,7 @@ export function useSettings() {
     } catch {
       /* Settings are a convenience; failing to persist them is not fatal. */
     }
-    document.documentElement.dataset.effects = settings.effects;
+    document.documentElement.dataset.appearance = settings.appearance;
   }, [settings]);
 
   const update = useCallback((patch: Partial<Settings>) => {

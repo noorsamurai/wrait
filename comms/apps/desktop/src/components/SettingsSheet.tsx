@@ -30,7 +30,7 @@ export function SettingsSheet({ settings, onChange, onSignOut, onClose, serverUr
       aria-label="Settings"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="glass glass--raised sheet">
+      <div className="surface surface--raised sheet">
         <h2 style={{ margin: "0 0 14px", fontSize: 18, fontWeight: 640 }}>Settings</h2>
 
         <div className="row">
@@ -73,15 +73,16 @@ export function SettingsSheet({ settings, onChange, onSignOut, onClose, serverUr
 
         <div className="row">
           <span className="row__body">
-            <span className="row__label">Reduce visual effects</span>
+            <span className="row__label">Glass appearance</span>
             <span className="row__hint">
-              Turns off the blur and the moving backdrop. Use this on older or low-memory computers.
+              Adds a translucent blur behind each panel. Looks richer, but costs noticeably more
+              to draw - leave it off on older or low-memory computers.
             </span>
           </span>
           <Switch
-            on={settings.effects === "reduced"}
-            label="Reduce visual effects"
-            onToggle={() => onChange({ effects: settings.effects === "reduced" ? "full" : "reduced" })}
+            on={settings.appearance === "glass"}
+            label="Glass appearance"
+            onToggle={() => onChange({ appearance: settings.appearance === "glass" ? "flat" : "glass" })}
           />
         </div>
 

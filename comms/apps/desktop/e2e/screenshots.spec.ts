@@ -85,11 +85,15 @@ test("capture the interface", async ({ browser }) => {
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
   await page.screenshot({ path: `${OUT}/03-settings.png` });
 
-  // Reduced-effects mode, for low-memory machines.
-  await page.getByRole("switch", { name: "Reduce visual effects" }).click();
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: `${OUT}/04-reduced-effects.png` });
-  await page.getByRole("switch", { name: "Reduce visual effects" }).click();
+  // The opt-in glass appearance, for machines that can spare the GPU time.
+  await page.getByRole("switch", { name: "Glass appearance" }).click();
+  await page.getByRole("button", { name: "Done" }).click();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${OUT}/04-glass-appearance.png` });
+
+  // Back to the flat default.
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("switch", { name: "Glass appearance" }).click();
   await page.getByRole("button", { name: "Done" }).click();
 
   // Light appearance.
