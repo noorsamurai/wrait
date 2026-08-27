@@ -42,6 +42,67 @@ apps/desktop/        The client, built for Windows / macOS / iOS
 the TypeScript client import the *same file*. There is no build step between
 them and no duplicated shape that can drift.
 
+## Running it on Windows
+
+Tested against Node 22 and Node 24.
+
+### Quickest look — no Rust needed
+
+This runs the real app in your browser. Everything works: accounts, messages,
+alert sounds, file transfer.
+
+```powershell
+winget install OpenJS.NodeJS.LTS Git.Git    # skip either if you have it
+npm install -g pnpm
+
+git clone -b claude/cross-platform-messaging-app-exqbfh https://github.com/noorsamurai/wrait.git
+cd wrait\comms
+pnpm install
+```
+
+Then two PowerShell windows:
+
+```powershell
+pnpm server     # window 1 - the relay
+pnpm dev        # window 2 - the app
+```
+
+Open <http://localhost:1420>, click **Create account**, and leave the server
+field at `http://localhost:8787`. Open a second browser window in private mode,
+make a second account, and message yourself between the two.
+
+### As a real Windows app
+
+Adds three prerequisites:
+
+1. **Rust** — <https://rustup.rs> (`rustup-init.exe`)
+2. **Visual Studio Build Tools** with the *Desktop development with C++*
+   workload — `winget install Microsoft.VisualStudio.2022.BuildTools`
+3. **WebView2** — already present on Windows 11 and Windows 10 21H2+
+
+```powershell
+pnpm --filter @comms/desktop tauri dev      # run it natively
+pnpm --filter @comms/desktop tauri build    # produce an installer
+```
+
+The installer lands in
+`comms\apps\desktop\src-tauri\target\release\bundle\msi\`.
+The first `tauri build` compiles the whole Rust dependency tree and takes
+several minutes; later builds are fast.
+
+### Letting colleagues connect
+
+The relay already listens on all interfaces. On first run Windows Firewall will
+ask — **allow it on Private networks**. The relay prints the address to hand
+out:
+
+```
+  point clients at:  http://192.168.1.20:8787
+```
+
+Everyone else enters that address on the sign-in screen instead of
+`localhost`. Keep the relay machine awake.
+
 ## Running it
 
 ### 1. The relay

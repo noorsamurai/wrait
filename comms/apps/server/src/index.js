@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { openDatabase } from "./db.js";
 import { createRequestHandler } from "./http.js";
 import { Hub } from "./realtime.js";
@@ -44,7 +45,11 @@ function lanAddresses() {
   return out;
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop());
+// Comparing file URLs rather than string-matching the path: on Windows
+// process.argv[1] is a backslash path, which no amount of "/" splitting will
+// line up against import.meta.url.
+const isMain =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
   const port = Number(process.env.PORT || 8787);
