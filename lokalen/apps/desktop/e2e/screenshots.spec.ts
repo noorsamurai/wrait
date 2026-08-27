@@ -41,6 +41,8 @@ test("fångar gränssnittet", async ({ browser }) => {
   // The sign-in screen, before anyone is authenticated.
   await page.goto("/");
   await page.getByLabel("Kontorets server").fill(SERVER);
+  // Let the office probe settle so the capture shows the resolved form.
+  await expect(page.getByText("Inget lösenord behövs")).toBeVisible();
   await page.screenshot({ path: `${OUT}/01-sign-in.png` });
 
   await signUp(page, PEOPLE[0]);

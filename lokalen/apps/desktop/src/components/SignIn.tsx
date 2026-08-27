@@ -96,14 +96,22 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
     }
   }
 
+  /**
+   * Assume an open office until the server says otherwise.
+   *
+   * Open is the default mode, and the probe is asynchronous: defaulting the
+   * other way flashes a username and password field at everyone for a moment,
+   * and leaves the wrong form on screen entirely if the probe never answers.
+   */
+  const open = office?.mode !== "password";
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError(null);
     try {
       const serverUrl = normaliseServerUrl(server);
-      const result =
-        office?.mode === "open"
+      const result = open
           ? await joinByName(serverUrl, name)
           : mode === "register"
             ? await register(serverUrl, { username, displayName: name || username, password })
@@ -118,7 +126,6 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
     }
   }
 
-  const open = office?.mode === "open";
   const canSubmit = open ? name.trim().length > 0 : username.trim().length > 0 && password.length > 0;
 
   return (
@@ -133,7 +140,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
         </div>
 
         {/* An open office has nothing to choose between. */}
-        {office && !open ? (
+        {!open ? (
           <div className="segmented" role="tablist">
             <button
               type="button"
@@ -213,7 +220,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
                 required
               />
               <p className="row__hint" style={{ marginTop: 6 }}>
-                Inget lösenord behövs på det här kontoret.
+                {probing ? "Kontrollerar kontoret…" : "Inget lösenord behövs på det här kontoret."}
               </p>
             </div>
           ) : (
