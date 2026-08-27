@@ -33,16 +33,65 @@ The shipped frontend is 63 KB gzipped in total.
 
 ```
 packages/protocol/   Wire types and constants, imported by BOTH sides
-apps/server/         The office relay: accounts, presence, messages, files
+apps/server/         The relay as a Node service, for an always-on machine
 apps/desktop/        The client, built for Windows / macOS / iOS
-  src-tauri/         The Rust shell and per-platform bundling
+  src-tauri/         The Rust shell, per-platform bundling, and
+    src/relay/       ...the same relay compiled into the app itself
 ```
+
+There are two interchangeable relay implementations speaking one protocol:
+
+| | `apps/server` (Node) | `src-tauri/src/relay` (Rust) |
+|---|---|---|
+| Runs as | a service on an always-on machine | inside the app, or as a `relay` binary |
+| Needs installed | Node 22+ | nothing |
+| Best for | a server that should never show a GUI | the portable exe, and small offices |
+
+They are not "similar" — the browser suite runs unmodified against both, so a
+client cannot tell which one it is talking to.
 
 `packages/protocol` is plain ESM with a sibling `.d.ts`, so the Node server and
 the TypeScript client import the *same file*. There is no build step between
 them and no duplicated shape that can drift.
 
-## Running it on Windows
+## Windows: one portable exe
+
+`tauri build` produces `wrait-comms.exe`, a single self-contained binary — the
+frontend is compiled into it and **so is the relay**. Copy it to a USB stick,
+double-click it, and it runs. There is nothing to install, nothing fetched at
+launch, and nothing left behind:
+
+* **No Node.** The relay is a Rust port compiled into the same binary, with
+  SQLite statically linked. Click *Host an office on this computer* on the
+  sign-in screen and this machine becomes the office server; everyone else
+  enters the address it displays.
+* **No install, no AppData.** Everything the app writes goes into a
+  `WraitComms-Data` folder beside the exe — settings, session, and the relay's
+  database and file blobs. On Windows the webview's own profile is redirected
+  there too, so your sign-in travels with the exe rather than being left in
+  `AppData`. Delete the folder and every trace is gone. If the exe sits
+  somewhere unwritable (Program Files, read-only media) it falls back to the
+  normal per-user data directory instead of refusing to start.
+* **No runtime downloads.** Installing dependencies on every launch would make
+  startup slower, break offline use, and strand files if the app ever crashed,
+  so the app deliberately does none of that.
+
+The one thing that is genuinely external is **WebView2**, which ships as part
+of Windows 11 and Windows 10 21H2+.
+
+To build it (on a Windows machine, with Rust and the *Desktop development with
+C++* workload installed):
+
+```powershell
+pnpm install
+pnpm --filter @comms/desktop tauri build
+```
+
+`wrait-comms.exe` lands in
+`comms\apps\desktop\src-tauri\target\release\`, alongside an `.msi` and an
+NSIS installer for people who prefer a normal install.
+
+## Running from source
 
 Tested against Node 22 and Node 24.
 
@@ -233,8 +282,12 @@ conversation slides over it.
 ## Tests
 
 ```bash
-pnpm test                                   # server, end to end
+pnpm test                                   # Node relay, end to end
 pnpm --filter @comms/desktop e2e            # the real UI in a browser
+cd apps/desktop/src-tauri && cargo test     # Rust relay authorization boundaries
+
+# The identical browser suite, against the embedded Rust relay:
+pnpm --filter @comms/desktop exec playwright test --config=playwright.rust.config.ts
 ```
 
 The server suite drives a live relay: registration, login (including the
@@ -244,7 +297,13 @@ along with its authorization boundaries.
 
 The browser suite signs two accounts up in separate browser contexts — two
 different machines — and has them chat, alert each other and exchange a 700 KB
-file, checking the downloaded bytes match what was sent.
+file, checking the downloaded bytes match what was sent. It runs unchanged
+against either relay, which is what proves the two are protocol-identical.
+
+The Rust suite covers the refusals the browser cannot reach: duplicate and
+malformed usernames, a login that must not reveal whether an account exists, a
+third party trying to read or write someone else's file, and truncated or
+out-of-range chunks that would otherwise corrupt a transfer.
 
 ## Security notes
 

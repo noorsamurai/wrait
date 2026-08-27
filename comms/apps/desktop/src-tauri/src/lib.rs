@@ -1,3 +1,6 @@
+pub mod portable;
+pub mod relay;
+
 use tauri::Window;
 
 // Only the macOS setup hook reaches for a window by name.
@@ -51,14 +54,73 @@ fn focus_window(window: Window) -> Result<(), String> {
     Ok(())
 }
 
+/// Live handle on the relay this machine is hosting, if any.
+#[derive(Default)]
+pub struct HostedRelay(tokio::sync::Mutex<Option<relay::Relay>>);
+
+/// Starts hosting an office on this computer.
+///
+/// This is what makes a single portable exe self-sufficient: one person clicks
+/// Host, and everyone else points their app at the address returned here. No
+/// Node, no database to install, nothing unpacked at launch.
+#[tauri::command]
+async fn start_relay(
+    state: tauri::State<'_, HostedRelay>,
+    port: Option<u16>,
+) -> Result<relay::RelayInfo, String> {
+    let mut hosted = state.0.lock().await;
+    if let Some(existing) = hosted.as_ref() {
+        // Already hosting: report the running relay rather than binding twice.
+        return Ok(existing.info.clone());
+    }
+
+    let started = relay::start(port.unwrap_or(8787), &portable::relay_dir()).await?;
+    let info = started.info.clone();
+    *hosted = Some(started);
+    Ok(info)
+}
+
+#[tauri::command]
+async fn stop_relay(state: tauri::State<'_, HostedRelay>) -> Result<(), String> {
+    let mut hosted = state.0.lock().await;
+    if let Some(relay) = hosted.take() {
+        relay.stop().await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn relay_status(
+    state: tauri::State<'_, HostedRelay>,
+) -> Result<Option<relay::RelayInfo>, String> {
+    Ok(state.0.lock().await.as_ref().map(|r| r.info.clone()))
+}
+
+/// Where this run keeps its data, and whether that is beside the exe.
+#[tauri::command]
+fn storage_location() -> serde_json::Value {
+    serde_json::json!({
+        "path": portable::data_dir().to_string_lossy(),
+        "portable": portable::is_portable(),
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(HostedRelay::default())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![alert_window, focus_window])
+        .invoke_handler(tauri::generate_handler![
+            alert_window,
+            focus_window,
+            start_relay,
+            stop_relay,
+            relay_status,
+            storage_location
+        ])
         .setup(|app| {
             // Vibrancy is only meaningful on desktop; on iOS the webview
             // already composites against the system background.

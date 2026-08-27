@@ -104,6 +104,46 @@ export async function focusWindow() {
   }
 }
 
+export interface RelayInfo {
+  port: number;
+  /** Addresses other machines on the LAN can reach. */
+  addresses: string[];
+}
+
+async function command<T>(name: string, args?: Record<string, unknown>): Promise<T | null> {
+  if (!inTauri()) return null;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return (await invoke(name, args)) as T;
+  } catch (err) {
+    throw new Error(err instanceof Error ? err.message : String(err));
+  }
+}
+
+/**
+ * Starts hosting an office on this computer.
+ *
+ * The relay is compiled into the app, so this needs nothing installed - it is
+ * what lets one portable exe be both the client and the server.
+ */
+export function startRelay(port?: number) {
+  return command<RelayInfo>("start_relay", { port });
+}
+
+export function stopRelay() {
+  return command<null>("stop_relay");
+}
+
+/** The relay this machine is already hosting, or null. */
+export function relayStatus() {
+  return command<RelayInfo | null>("relay_status").catch(() => null);
+}
+
+/** Where the app keeps its data, and whether that is beside the exe. */
+export function storageLocation() {
+  return command<{ path: string; portable: boolean }>("storage_location").catch(() => null);
+}
+
 /** Coarse platform hint, used only to adapt the layout. */
 export async function platformName(): Promise<string> {
   if (!inTauri()) return "web";

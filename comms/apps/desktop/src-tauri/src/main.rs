@@ -2,5 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // Must happen before Tauri builds the webview, or WebView2 will already
+    // have picked a profile folder under AppData and the app would stop being
+    // portable.
+    wrait_comms_lib::portable::redirect_webview_profile();
     wrait_comms_lib::run()
 }

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ApiError, login, normaliseServerUrl, register, type Session } from "../lib/client";
 import { lastServerUrl, rememberServerUrl } from "../lib/settings";
+import { isNative, relayStatus, startRelay, type RelayInfo } from "../lib/native";
 import { LogoMark } from "./icons";
 
 type Mode = "signin" | "register";
@@ -13,6 +14,34 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hosting, setHosting] = useState<RelayInfo | null>(null);
+  const [hostBusy, setHostBusy] = useState(false);
+
+  // If this machine is already hosting - the app was reopened, say - adopt
+  // that relay rather than offering to start a second one.
+  useEffect(() => {
+    void relayStatus().then((info) => {
+      if (!info) return;
+      setHosting(info);
+      setServer(info.addresses[0] ?? `http://localhost:${info.port}`);
+    });
+  }, []);
+
+  async function host() {
+    setHostBusy(true);
+    setError(null);
+    try {
+      const info = await startRelay();
+      if (!info) return;
+      setHosting(info);
+      setServer(info.addresses[0] ?? `http://localhost:${info.port}`);
+      setMode("register");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start hosting on this computer.");
+    } finally {
+      setHostBusy(false);
+    }
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -128,6 +157,29 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
           <button className="btn btn--primary" type="submit" disabled={busy} style={{ marginTop: 4 }}>
             {busy ? "Working…" : mode === "register" ? "Create account" : "Sign in"}
           </button>
+
+          {/* Hosting only exists in the native app - a browser tab cannot
+              listen on a port for the rest of the office. */}
+          {isNative() ? (
+            hosting ? (
+              <p className="row__hint" style={{ margin: 0 }}>
+                Hosting this office on port {hosting.port}. Others should enter{" "}
+                <strong>{hosting.addresses[0]}</strong>
+              </p>
+            ) : (
+              <>
+                <div className="signin__divider">
+                  <span>or</span>
+                </div>
+                <button className="btn" type="button" onClick={host} disabled={hostBusy}>
+                  {hostBusy ? "Starting…" : "Host an office on this computer"}
+                </button>
+                <p className="row__hint" style={{ margin: 0 }}>
+                  Runs the server inside this app, so nobody has to install anything.
+                </p>
+              </>
+            )
+          ) : null}
         </div>
       </form>
     </div>

@@ -606,3 +606,21 @@
 @media (max-width: 760px) {
   .back-button { display: inline-flex; }
 }
+
+/* A labelled rule separating "sign in" from "host it yourself". */
+.signin__divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+}
+
+.signin__divider::before,
+.signin__divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
