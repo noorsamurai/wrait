@@ -1,0 +1,9 @@
+# Statically link the MSVC C runtime on Windows.
+#
+# Without this the exe imports VCRUNTIME140.dll, part of the Visual C++
+# redistributable, which is NOT guaranteed on a clean Windows install - the
+# app would fail to start with a missing-DLL dialog on exactly the machines
+# a portable build is meant for. Costs a few hundred KB of binary size and
+# buys a genuinely self-contained executable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
