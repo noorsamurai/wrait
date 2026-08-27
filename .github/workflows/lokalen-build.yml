@@ -10,7 +10,7 @@ on:
 
 defaults:
   run:
-    working-directory: comms
+    working-directory: lokalen
 
 jobs:
   test:
