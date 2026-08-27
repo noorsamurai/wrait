@@ -1,0 +1,16 @@
+{
+  "name": "wrait-comms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-platform office messenger for Windows, macOS and iOS",
+  "scripts": {
+    "server": "node --experimental-sqlite apps/server/src/index.js",
+    "dev": "pnpm --filter @comms/desktop dev",
+    "build": "pnpm --filter @comms/desktop build",
+    "typecheck": "tsc -b --pretty false",
+    "test": "node --experimental-sqlite --test apps/server/test/*.test.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
