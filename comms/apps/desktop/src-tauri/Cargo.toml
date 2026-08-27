@@ -34,6 +34,8 @@ futures-util = "0.3.34"
 local-ip-address = "0.6.13"
 tower-http = { version = "0.7.0", features = ["cors"] }
 tokio-util = { version = "0.7.19", features = ["io"] }
+socket2 = "0.6.5"
+gethostname = "1.1.0"
 
 [profile.release]
 # Small binary and low resident memory matter more here than raw speed: the

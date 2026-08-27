@@ -5,6 +5,7 @@
 //! launch and nothing left behind on exit. SQLite is compiled in, and the
 //! whole relay is a task on the app's own tokio runtime.
 
+pub mod discovery;
 pub mod files;
 pub mod hub;
 pub mod model;
@@ -31,11 +32,15 @@ pub struct Relay {
     pub info: RelayInfo,
     shutdown: tokio::sync::oneshot::Sender<()>,
     handle: tokio::task::JoinHandle<()>,
+    beacon: Option<discovery::Beacon>,
 }
 
 impl Relay {
-    /// Stops the relay and waits for the listener to close.
+    /// Stops announcing, stops the relay, and waits for the listener to close.
     pub async fn stop(self) {
+        if let Some(beacon) = self.beacon {
+            beacon.stop();
+        }
         let _ = self.shutdown.send(());
         let _ = self.handle.await;
     }
@@ -92,6 +97,10 @@ pub async fn start(port: u16, data_dir: &Path) -> Result<Relay, String> {
         }
     });
 
+    // Announcing is a convenience: if the discovery port is unavailable the
+    // relay still serves, people just have to type the address.
+    let beacon = discovery::announce(bound, uuid::Uuid::new_v4().to_string());
+
     Ok(Relay {
         info: RelayInfo {
             port: bound,
@@ -99,5 +108,6 @@ pub async fn start(port: u16, data_dir: &Path) -> Result<Relay, String> {
         },
         shutdown,
         handle,
+        beacon,
     })
 }

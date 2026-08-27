@@ -139,6 +139,25 @@ export function relayStatus() {
   return command<RelayInfo | null>("relay_status").catch(() => null);
 }
 
+export interface DiscoveredOffice {
+  id: string;
+  /** The hosting computer's name. */
+  name: string;
+  /** Ready to use as a server address. */
+  url: string;
+}
+
+/**
+ * Looks for offices being hosted on this network, so nobody has to read an IP
+ * address out loud. Returns an empty list in the browser, where there is no
+ * way to send a UDP probe.
+ */
+export function discoverOffices(timeoutMs?: number) {
+  return command<DiscoveredOffice[]>("discover_offices", { timeoutMs })
+    .then((found) => found ?? [])
+    .catch(() => []);
+}
+
 /** Where the app keeps its data, and whether that is beside the exe. */
 export function storageLocation() {
   return command<{ path: string; portable: boolean }>("storage_location").catch(() => null);

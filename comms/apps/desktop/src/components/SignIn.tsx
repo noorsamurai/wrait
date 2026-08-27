@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { ApiError, login, normaliseServerUrl, register, type Session } from "../lib/client";
 import { lastServerUrl, rememberServerUrl } from "../lib/settings";
-import { isNative, relayStatus, startRelay, type RelayInfo } from "../lib/native";
+import {
+  discoverOffices, isNative, relayStatus, startRelay,
+  type DiscoveredOffice, type RelayInfo,
+} from "../lib/native";
 import { LogoMark } from "./icons";
 
 type Mode = "signin" | "register";
@@ -16,6 +19,24 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
   const [error, setError] = useState<string | null>(null);
   const [hosting, setHosting] = useState<RelayInfo | null>(null);
   const [hostBusy, setHostBusy] = useState(false);
+  const [nearby, setNearby] = useState<DiscoveredOffice[]>([]);
+  const [scanning, setScanning] = useState(isNative());
+
+  /** Probes the network and offers whatever answers. */
+  async function scan() {
+    setScanning(true);
+    try {
+      setNearby(await discoverOffices());
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  // Look as soon as the window opens: by the time someone has read the form,
+  // the office next to them is usually already listed.
+  useEffect(() => {
+    if (isNative()) void scan();
+  }, []);
 
   // If this machine is already hosting - the app was reopened, say - adopt
   // that relay rather than offering to start a second one.
@@ -106,6 +127,37 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
               spellCheck={false}
               required
             />
+
+            {isNative() && !hosting ? (
+              <div className="nearby">
+                {scanning ? (
+                  <span className="nearby__status">Looking for offices on this network…</span>
+                ) : nearby.length > 0 ? (
+                  <>
+                    <span className="nearby__status">On this network:</span>
+                    {nearby.map((office) => (
+                      <button
+                        key={office.id || office.url}
+                        type="button"
+                        className="chip"
+                        aria-pressed={server === office.url}
+                        onClick={() => setServer(office.url)}
+                        title={office.url}
+                      >
+                        {office.name}
+                      </button>
+                    ))}
+                  </>
+                ) : (
+                  <span className="nearby__status">No offices found on this network.</span>
+                )}
+                {scanning ? null : (
+                  <button type="button" className="nearby__again" onClick={scan}>
+                    Search again
+                  </button>
+                )}
+              </div>
+            ) : null}
           </div>
 
           <div>

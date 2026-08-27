@@ -96,6 +96,16 @@ async fn relay_status(
     Ok(state.0.lock().await.as_ref().map(|r| r.info.clone()))
 }
 
+/// Looks for offices being hosted on this network.
+///
+/// Saves everyone the ritual of reading an IP address out loud: the hosting
+/// machine answers a UDP probe and the app fills the address in.
+#[tauri::command]
+async fn discover_offices(timeout_ms: Option<u64>) -> Result<Vec<relay::discovery::DiscoveredOffice>, String> {
+    let window = std::time::Duration::from_millis(timeout_ms.unwrap_or(1200).clamp(200, 5000));
+    Ok(relay::discovery::discover(window).await)
+}
+
 /// Where this run keeps its data, and whether that is beside the exe.
 #[tauri::command]
 fn storage_location() -> serde_json::Value {
@@ -119,6 +129,7 @@ pub fn run() {
             start_relay,
             stop_relay,
             relay_status,
+            discover_offices,
             storage_location
         ])
         .setup(|app| {

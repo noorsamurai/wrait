@@ -5469,6 +5469,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures-util",
+ "gethostname",
  "hex",
  "http-body-util",
  "local-ip-address",
@@ -5478,6 +5479,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "socket2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

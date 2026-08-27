@@ -624,3 +624,42 @@
   height: 1px;
   background: var(--border);
 }
+
+/* Offices found on the LAN, offered under the server field. */
+.nearby {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.nearby__status {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+.chip {
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.12s var(--ease), border-color 0.12s var(--ease);
+}
+
+.chip:hover { background: var(--surface-3); }
+
+.chip[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.nearby__again {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

@@ -72,6 +72,9 @@ launch, and nothing left behind:
   `AppData`. Delete the folder and every trace is gone. If the exe sits
   somewhere unwritable (Program Files, read-only media) it falls back to the
   normal per-user data directory instead of refusing to start.
+* **No IP addresses to read out.** The hosting machine announces itself on the
+  LAN, and every other copy of the app lists it by computer name on the
+  sign-in screen — click the name instead of typing an address.
 * **No runtime downloads.** Installing dependencies on every launch would make
   startup slower, break offline use, and strand files if the app ever crashed,
   so the app deliberately does none of that.
@@ -141,9 +144,13 @@ several minutes; later builds are fast.
 
 ### Letting colleagues connect
 
-The relay already listens on all interfaces. On first run Windows Firewall will
-ask — **allow it on Private networks**. The relay prints the address to hand
-out:
+The relay listens on all interfaces. On first run Windows Firewall will ask —
+**allow it on Private networks**, which covers both the relay's TCP port and
+the UDP port it announces on. Deny it and colleagues can neither discover nor
+reach this machine.
+
+Once allowed, everyone else just clicks this computer's name on their sign-in
+screen. The relay also prints its address, if you would rather hand one out:
 
 ```
   point clients at:  http://192.168.1.20:8787
@@ -217,6 +224,24 @@ Tones are synthesised with WebAudio rather than shipped as audio files — a few
 hundred bytes of code instead of decoded audio held in memory, and identical on
 every platform.
 
+**Finding an office.** Typing an IP address was the weakest part of an
+otherwise double-click-and-go app, so a hosting machine answers UDP probes on
+port 45888 and announces itself every few seconds. Clients shout once when the
+window opens and list whatever replies, by computer name.
+
+Probes go out over *both* multicast (239.255.77.88, an administratively scoped
+group — deliberately not LocalSend's, so the two never answer each other) and
+broadcast, because plenty of office access points and switches quietly drop one
+or the other. The address dialled is the one the reply physically came from,
+never anything the packet claims, so a host cannot advertise someone else's
+machine. If the discovery port cannot be bound the relay still serves normally
+and people simply type the address, as before.
+
+The approach is the one [LocalSend](https://github.com/localsend/localsend)
+uses to good effect. It is reimplemented here rather than borrowed as code:
+LocalSend is Dart, and being accountless by design it solves a different
+problem.
+
 **File transfer.** Files are split into 512 KiB chunks and each chunk is
 written at its own byte offset in the destination file. Three consequences:
 chunks may arrive in any order, an interrupted upload resumes from what the
@@ -284,7 +309,7 @@ conversation slides over it.
 ```bash
 pnpm test                                   # Node relay, end to end
 pnpm --filter @comms/desktop e2e            # the real UI in a browser
-cd apps/desktop/src-tauri && cargo test     # Rust relay authorization boundaries
+cd apps/desktop/src-tauri && cargo test     # Rust relay boundaries + LAN discovery
 
 # The identical browser suite, against the embedded Rust relay:
 pnpm --filter @comms/desktop exec playwright test --config=playwright.rust.config.ts
@@ -303,7 +328,9 @@ against either relay, which is what proves the two are protocol-identical.
 The Rust suite covers the refusals the browser cannot reach: duplicate and
 malformed usernames, a login that must not reveal whether an account exists, a
 third party trying to read or write someone else's file, and truncated or
-out-of-range chunks that would otherwise corrupt a transfer.
+out-of-range chunks that would otherwise corrupt a transfer. It also starts a
+real beacon on a real socket and checks it is discoverable while hosting and
+gone once stopped.
 
 ## Security notes
 
