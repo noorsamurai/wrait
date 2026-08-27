@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover lets the layout use the full iPhone screen; the
+         safe-area insets in glass.css keep content clear of the notch. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+    <meta name="color-scheme" content="dark light" />
+    <!-- Inlined so the app fetches nothing at startup, offline included. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='9' fill='%235a6f8a'/%3E%3Cpath d='M11 15.5h18M11 20h12' stroke='%23f6f4f0' stroke-width='2.4' stroke-linecap='round'/%3E%3Ccircle cx='27.5' cy='25.5' r='3.2' fill='%23f6f4f0'/%3E%3C/svg%3E"
+    />
+    <title>Lokalen</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

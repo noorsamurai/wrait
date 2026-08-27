@@ -1,0 +1,9 @@
+{
+  "name": "@lokalen/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": { "types": "./src/index.d.ts", "default": "./src/index.js" } },
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts"
+}
