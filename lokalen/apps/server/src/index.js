@@ -3,7 +3,7 @@ import { networkInterfaces } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { openDatabase } from "./db.js";
-import { setSetting, getSetting, officeInfo } from "./store.js";
+import { setSetting, getSetting, officeInfo, seedRooms } from "./store.js";
 import { createRequestHandler } from "./http.js";
 import { Hub } from "./realtime.js";
 
@@ -26,6 +26,10 @@ export function createApp({ dataDir, allowOrigin, mode, officeName } = {}) {
   if (!getSetting(db, "office_name")) {
     setSetting(db, "office_name", officeName ?? process.env.OFFICE_NAME ?? "Lokalen");
   }
+
+  // Every office starts with its rooms and the Alla channel present, so the
+  // first machine to connect already has somewhere to send.
+  seedRooms(db);
 
   const hub = new Hub(db);
   const server = createServer(createRequestHandler({ db, dataDir: dir, hub, allowOrigin }));

@@ -847,3 +847,64 @@
 }
 
 .tasks__quick .chip { font-size: 11.5px; padding: 3px 9px; }
+
+/* ------------------------------------------------------------------ */
+/* Rooms                                                               */
+/* ------------------------------------------------------------------ */
+
+/* The Alla channel gets a mark rather than a monogram: it is a place to
+   talk, not a room with someone in it. */
+.channel-mark {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+  background: var(--surface-3);
+  color: var(--ink-soft);
+}
+
+.person__operator {
+  font-weight: 400;
+  color: var(--ink-faint);
+}
+
+.avatar__dot[data-presence="busy"] { background: var(--alert); }
+
+.roster__foot {
+  display: block;
+  padding: 8px 10px 10px;
+}
+
+.roster__self {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+
+/* Availability sits under the room, always visible - a status you have to go
+   looking for is a status nobody sets. */
+.segmented--status {
+  margin-bottom: 0;
+}
+
+.segmented--status button[aria-selected="true"] {
+  color: var(--ink);
+}
+
+.segmented--status button:first-child[aria-selected="true"] {
+  border-color: var(--positive);
+  color: var(--positive);
+}
+
+.segmented--status button:last-child[aria-selected="true"] {
+  border-color: var(--alert);
+  color: var(--alert);
+}
+
+.roster__self .btn--icon[aria-pressed="true"] {
+  border-color: var(--alert);
+  color: var(--alert);
+}

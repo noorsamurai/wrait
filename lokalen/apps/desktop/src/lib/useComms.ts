@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { Attachment, Message, OfficeInfo, ServerEvent, Task, User, UserId } from "@lokalen/protocol";
-import { Realtime, byConversation, type Session } from "./client";
+import type {
+  Attachment, Availability, Message, OfficeInfo, ServerEvent, Task, User, UserId,
+} from "@lokalen/protocol";
+import { Realtime, byConversation, conversationOf, type Session } from "./client";
 import { notify, requestAttention, requestNotificationAccess } from "./native";
 import { playAlertTone, playMessageTone, playNudgeTone } from "./sound";
 import type { Settings } from "./settings";
@@ -16,10 +18,12 @@ interface State {
   /** Every task in this person's list, plus ones they sent to others. */
   tasks: Task[];
   office: OfficeInfo | null;
+  /** Conversations known to have no more history behind them. */
+  exhausted: Record<UserId, boolean>;
   ready: boolean;
 }
 
-const EMPTY: State = { self: null, users: [], threads: {}, unread: {}, typing: {}, tasks: [], office: null, ready: false };
+const EMPTY: State = { self: null, users: [], threads: {}, unread: {}, typing: {}, tasks: [], office: null, exhausted: {}, ready: false };
 
 type Action =
   | { type: "event"; event: ServerEvent; selfId: UserId | null; activePeer: UserId | null }
@@ -29,8 +33,13 @@ type Action =
   | { type: "expireTyping"; peer: UserId }
   | { type: "reset" };
 
-function peerOf(message: Message, selfId: UserId | null) {
-  return message.from === selfId ? message.to : message.from;
+function peerOf(message: Message, selfId: UserId | null, broadcastId: UserId | null) {
+  return conversationOf(message, selfId ?? "", broadcastId);
+}
+
+/** The Alla channel's id, or null before the roster has arrived. */
+function broadcastIdOf(users: User[]): UserId | null {
+  return users.find((u) => u.kind === "broadcast")?.id ?? null;
 }
 
 /** Appends, replacing an optimistic copy when the server's version arrives. */
@@ -54,7 +63,7 @@ function reduce(state: State, action: Action): State {
       return EMPTY;
 
     case "optimistic": {
-      const peer = peerOf(action.message, state.self?.id ?? null);
+      const peer = peerOf(action.message, state.self?.id ?? null, broadcastIdOf(state.users));
       return { ...state, threads: { ...state.threads, [peer]: merge(state.threads[peer], action.message) } };
     }
 
@@ -96,13 +105,19 @@ function reduce(state: State, action: Action): State {
 function applyEvent(state: State, { event, activePeer }: Extract<Action, { type: "event" }>): State {
   switch (event.t) {
     case "ready": {
+      const channel = broadcastIdOf(event.users);
       const threads: Record<UserId, Message[]> = {};
-      for (const [peer, list] of byConversation(event.history, event.self.id)) threads[peer] = list;
+      for (const [peer, list] of byConversation(event.history, event.self.id, channel)) {
+        threads[peer] = list;
+      }
 
       // Anything unread that arrived while this client was away.
       const unread: Record<UserId, number> = {};
       for (const message of event.history) {
-        if (message.to === event.self.id && !message.readAt) {
+        // A broadcast counts against the channel, not against whoever sent it.
+        if (message.to === channel && message.from !== event.self.id) {
+          unread[channel] = (unread[channel] ?? 0) + 1;
+        } else if (message.to === event.self.id && !message.readAt) {
           unread[message.from] = (unread[message.from] ?? 0) + 1;
         }
       }
@@ -116,6 +131,7 @@ function applyEvent(state: State, { event, activePeer }: Extract<Action, { type:
         typing: {},
         tasks: event.tasks ?? [],
         office: event.office ?? null,
+        exhausted: {},
         ready: true,
       };
     }
@@ -138,15 +154,35 @@ function applyEvent(state: State, { event, activePeer }: Extract<Action, { type:
       return {
         ...state,
         users: state.users.map((u) =>
-          u.id === event.userId ? { ...u, presence: event.presence, lastSeen: event.lastSeen } : u,
+          u.id === event.userId
+            ? {
+                ...u,
+                presence: event.presence,
+                lastSeen: event.lastSeen,
+                availability: event.availability ?? u.availability,
+                // `operator` is nullable, so only an absent key means "unchanged".
+                operator: "operator" in event ? event.operator ?? null : u.operator,
+              }
+            : u,
         ),
       };
+
+    case "history": {
+      const existing = state.threads[event.withUser] ?? [];
+      const known = new Set(existing.map((m) => m.id));
+      const older = event.messages.filter((m) => !known.has(m.id));
+      return {
+        ...state,
+        threads: { ...state.threads, [event.withUser]: [...older, ...existing] },
+        exhausted: { ...state.exhausted, [event.withUser]: event.exhausted },
+      };
+    }
 
     case "message":
     case "ack": {
       const message = event.message;
       const selfId = state.self?.id ?? null;
-      const peer = peerOf(message, selfId);
+      const peer = peerOf(message, selfId, broadcastIdOf(state.users));
       const incoming = message.from !== selfId;
       const unread =
         incoming && peer !== activePeer
@@ -194,17 +230,23 @@ export function useComms(session: Session | null, settings: Settings) {
   // session rather than being torn down whenever a setting changes.
   const activePeerRef = useRef<UserId | null>(null);
   const settingsRef = useRef(settings);
+  const mutedByStatusRef = useRef(false);
   const stateRef = useRef(state);
   activePeerRef.current = activePeer;
   settingsRef.current = settings;
   stateRef.current = state;
+  mutedByStatusRef.current =
+    state.users.find((u) => u.id === state.self?.id)?.availability === "busy";
 
   const announce = useCallback((event: ServerEvent) => {
     const current = settingsRef.current;
     const focused = typeof document !== "undefined" && document.hasFocus();
+    // Busy means with a patient, which is exactly when a chime is least
+    // welcome; the quick mute is the manual equivalent.
+    const audible = current.sound && !current.muted && !mutedByStatusRef.current;
 
     if (event.t === "nudge") {
-      if (current.sound) playNudgeTone(current.volume);
+      if (audible) playNudgeTone(current.volume);
       const from = stateRef.current.users.find((u) => u.id === event.from);
       setNudgedBy(event.from);
       setTimeout(() => setNudgedBy(null), 4000);
@@ -220,7 +262,7 @@ export function useComms(session: Session | null, settings: Settings) {
       const incoming = task.owner === self && task.createdBy !== self && !task.clearedAt;
       const known = stateRef.current.tasks.some((t) => t.id === task.id);
       if (incoming && !known) {
-        if (current.sound) playMessageTone(current.volume);
+        if (audible) playMessageTone(current.volume);
         const from = stateRef.current.users.find((u) => u.id === task.createdBy);
         if (current.notifications && !focused) {
           void notify(`Ny uppgift från ${from?.displayName ?? "någon"}`, task.title);
@@ -233,7 +275,7 @@ export function useComms(session: Session | null, settings: Settings) {
     const message = event.message;
     if (message.from === stateRef.current.self?.id) return;
 
-    if (current.sound) {
+    if (audible) {
       if (message.alert) playAlertTone(current.volume);
       else playMessageTone(current.volume);
     }
@@ -327,6 +369,24 @@ export function useComms(session: Session | null, settings: Settings) {
 
   const nudge = useCallback((to: UserId) => realtime.current?.send({ t: "nudge", to }), []);
 
+  const setAvailability = useCallback(
+    (availability: Availability) => realtime.current?.send({ t: "availability", availability }),
+    [],
+  );
+
+  /** Names, or clears, who is working in this room right now. */
+  const setOperator = useCallback(
+    (name: string | null) => realtime.current?.send({ t: "operator", name }),
+    [],
+  );
+
+  /** Pulls in the page of messages before the oldest one already shown. */
+  const loadOlder = useCallback((peer: UserId) => {
+    const list = stateRef.current.threads[peer] ?? [];
+    if (stateRef.current.exhausted[peer]) return;
+    realtime.current?.send({ t: "history", withUser: peer, before: list[0]?.sentAt ?? Date.now() });
+  }, []);
+
   const addTask = useCallback(
     (input: { title: string; notes?: string; dueAt?: number | null; owner?: UserId; sourceMessageId?: string }) =>
       realtime.current?.send({ t: "taskAdd", ...input }),
@@ -366,8 +426,19 @@ export function useComms(session: Session | null, settings: Settings) {
     [state.unread],
   );
 
+  /**
+   * The roster is the live copy of every room, including this one, so `self`
+   * is derived from it rather than from the snapshot taken at connect - which
+   * never learns about a later status or operator change.
+   */
+  const liveSelf = useMemo(
+    () => state.users.find((u) => u.id === state.self?.id) ?? state.self,
+    [state.users, state.self],
+  );
+
   return {
     ...state,
+    self: liveSelf,
     connected,
     activePeer,
     active,
@@ -378,6 +449,9 @@ export function useComms(session: Session | null, settings: Settings) {
     nudge,
     setTyping,
     openConversation,
+    setAvailability,
+    setOperator,
+    loadOlder,
     addTask,
     editTask,
     clearTask,

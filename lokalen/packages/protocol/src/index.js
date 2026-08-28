@@ -62,3 +62,15 @@ export function sortTasks(tasks, direction = "asc") {
     return (b.createdAt - a.createdAt) * sign;
   });
 }
+
+/**
+ * The rooms a new office starts with.
+ *
+ * A room is a place rather than a person: whoever is standing in
+ * Behandlingsrum 1 sends as Behandlingsrum 1, which is what matters when
+ * staff move between rooms from one day to the next.
+ */
+export const DEFAULT_ROOMS = ["Behandlingsrum 1", "Behandlingsrum 2", "Reception"];
+
+/** The channel every room can see. */
+export const BROADCAST_ROOM = "Alla";

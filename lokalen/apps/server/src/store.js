@@ -1,4 +1,5 @@
-import { initialsOf, DEFAULT_OFFICE_NAME } from "@lokalen/protocol";
+import { randomUUID } from "node:crypto";
+import { initialsOf, DEFAULT_OFFICE_NAME, DEFAULT_ROOMS, BROADCAST_ROOM } from "@lokalen/protocol";
 
 /** Maps a `users` row onto the wire `User` shape. */
 export function toUser(row, presence = "offline") {
@@ -8,6 +9,9 @@ export function toUser(row, presence = "offline") {
     displayName: row.display_name,
     initials: initialsOf(row.display_name),
     presence,
+    availability: row.availability === "busy" ? "busy" : "available",
+    operator: row.operator ?? null,
+    kind: row.kind === "broadcast" ? "broadcast" : "room",
     lastSeen: row.last_seen ?? null,
   };
 }
@@ -87,17 +91,51 @@ export function getMessage(db, id) {
  * fast payload on connect rather than the entire archive.
  */
 export function recentHistory(db, userId, limit = 500) {
+  const channel = broadcastRoom(db);
   const rows = db
     .prepare(
       `SELECT ${MESSAGE_COLUMNS}
          FROM messages m
          LEFT JOIN files f ON f.id = m.file_id
-        WHERE m.from_id = ? OR m.to_id = ?
+        WHERE m.from_id = ? OR m.to_id = ? OR m.to_id = ?
         ORDER BY m.sent_at DESC
         LIMIT ?`
     )
-    .all(userId, userId, limit);
+    .all(userId, userId, channel ? channel.id : "", limit);
   return rows.map(toMessage).reverse();
+}
+
+/**
+ * One conversation's messages older than `before`, oldest first.
+ *
+ * Connecting sends a recent slice; this is what the reader scrolling upwards
+ * pulls in behind it, so an office keeps its whole history without every
+ * client loading all of it.
+ */
+export function historyBefore(db, userId, peerId, before, limit = 200) {
+  const channel = broadcastRoom(db);
+  const isChannel = channel && peerId === channel.id;
+
+  const rows = isChannel
+    ? db
+        .prepare(
+          `SELECT ${MESSAGE_COLUMNS} FROM messages m
+             LEFT JOIN files f ON f.id = m.file_id
+            WHERE m.to_id = ? AND m.sent_at < ?
+            ORDER BY m.sent_at DESC LIMIT ?`
+        )
+        .all(peerId, before, limit)
+    : db
+        .prepare(
+          `SELECT ${MESSAGE_COLUMNS} FROM messages m
+             LEFT JOIN files f ON f.id = m.file_id
+            WHERE ((m.from_id = ? AND m.to_id = ?) OR (m.from_id = ? AND m.to_id = ?))
+              AND m.sent_at < ?
+            ORDER BY m.sent_at DESC LIMIT ?`
+        )
+        .all(userId, peerId, peerId, userId, before, limit);
+
+  return { messages: rows.map(toMessage).reverse(), exhausted: rows.length < limit };
 }
 
 /** Marks everything `peer` sent to `userId` up to `upTo` as read. */
@@ -195,4 +233,65 @@ export function updateTask(db, id, patch) {
 
 export function deleteTask(db, id) {
   db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+}
+
+/* ------------------------------------------------------------------ */
+/* Rooms                                                               */
+/* ------------------------------------------------------------------ */
+
+/** Slug used for the UNIQUE constraint; nobody types or sees it. */
+function slugOf(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "rum";
+}
+
+export function createRoom(db, displayName, kind = "room") {
+  const id = randomUUID();
+  let username = slugOf(displayName);
+  // A slug collision is possible ("Rum 1" and "rum-1"); make it unique rather
+  // than failing the join.
+  if (db.prepare("SELECT 1 FROM users WHERE username = ?").get(username)) {
+    username = `${username}-${id.slice(0, 4)}`;
+  }
+  db.prepare(
+    `INSERT INTO users (id, username, display_name, pw_hash, pw_salt, created_at, last_seen, kind)
+     VALUES (?, ?, ?, '', '', ?, NULL, ?)`
+  ).run(id, username, displayName, Date.now(), kind);
+  return id;
+}
+
+export function findRoomByName(db, displayName) {
+  return (
+    db
+      .prepare("SELECT * FROM users WHERE display_name = ? COLLATE NOCASE")
+      .get(displayName) ?? null
+  );
+}
+
+export function broadcastRoom(db) {
+  return findRoomByName(db, BROADCAST_ROOM);
+}
+
+/**
+ * Creates the rooms an office starts with, once.
+ *
+ * The Alla channel is a room row too, flagged as a broadcast, so addressing
+ * it needs no special case anywhere a message is stored or read back.
+ */
+export function seedRooms(db, rooms = DEFAULT_ROOMS) {
+  if (!broadcastRoom(db)) createRoom(db, BROADCAST_ROOM, "broadcast");
+  for (const name of rooms) {
+    if (!findRoomByName(db, name)) createRoom(db, name);
+  }
+}
+
+export function setAvailability(db, id, availability) {
+  db.prepare("UPDATE users SET availability = ? WHERE id = ?").run(
+    availability === "busy" ? "busy" : "available",
+    id
+  );
+}
+
+export function setOperator(db, id, name) {
+  const trimmed = typeof name === "string" ? name.trim().slice(0, 64) : "";
+  db.prepare("UPDATE users SET operator = ? WHERE id = ?").run(trimmed || null, id);
 }

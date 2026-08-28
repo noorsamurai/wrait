@@ -24,6 +24,7 @@ use super::store::{self, Db};
 const MAX_BODY_LENGTH: usize = 8000;
 const HISTORY_LIMIT: i64 = 500;
 const TASK_LIMIT: i64 = 500;
+const PAGE_LIMIT: i64 = 200;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -254,7 +255,16 @@ async fn file_init(State(state): State<AppState>, headers: HeaderMap, body: Stri
 }
 
 async fn office(State(state): State<AppState>) -> Response {
-    Json(store::office_info(&state.db)).into_response()
+    let info = store::office_info(&state.db);
+    // The sign-in screen offers these: you choose the room this machine is
+    // in, not a personal account.
+    Json(json!({
+        "name": info.name,
+        "mode": info.mode,
+        "version": info.version,
+        "rooms": store::room_names(&state.db),
+    }))
+    .into_response()
 }
 
 /// Name-only entry, for an office running in open mode.
@@ -277,23 +287,33 @@ async fn join(State(state): State<AppState>, body: String) -> Response {
         .collect::<String>();
 
     if display_name.is_empty() {
-        return fail(StatusCode::BAD_REQUEST, "invalid", "Skriv ett namn.");
+        return fail(StatusCode::BAD_REQUEST, "invalid", "Välj ett rum.");
     }
 
-    if let Some(existing) = store::find_by_display_name(&state.db, &display_name) {
+    if let Some(existing) = store::find_room_by_name(&state.db, &display_name) {
+        if existing.kind == "broadcast" {
+            return fail(
+                StatusCode::BAD_REQUEST,
+                "invalid",
+                "Det går inte att logga in som en kanal.",
+            );
+        }
+        // A room already in the office is taken over rather than duplicated,
+        // so a restarting reception PC keeps Reception's history - but only
+        // while nobody else holds it.
         if state.hub.presence_of(&existing.id) != "offline" {
             return fail(
                 StatusCode::CONFLICT,
-                "name_taken",
-                "Någon använder det namnet just nu. Välj ett annat.",
+                "room_taken",
+                "En annan dator är redan inloggad som det rummet.",
             );
         }
         let token = store::create_session(&state.db, &existing.id);
         return Json(json!({ "token": token, "user": existing.to_user("offline") })).into_response();
     }
 
-    let Some(id) = store::create_guest(&state.db, &display_name) else {
-        return fail(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Kunde inte skapa användaren.");
+    let Some(id) = store::create_room(&state.db, &display_name, "room") else {
+        return fail(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Kunde inte skapa rummet.");
     };
     let Some(row) = store::find_by_id(&state.db, &id) else {
         return fail(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Kunde inte skapa användaren.");
@@ -441,11 +461,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, user_id: String) {
     }
 
     if was_offline {
-        state.hub.broadcast(&ServerEvent::Presence {
-            user_id: user_id.clone(),
-            presence: "online",
-            last_seen: Some(now_ms()),
-        });
+        announce_presence(&state, &user_id);
     }
 
     while let Some(Ok(frame)) = stream.next().await {
@@ -467,14 +483,9 @@ async fn handle_socket(socket: WebSocket, state: AppState, user_id: String) {
     }
 
     // Socket closed.
-    let now = now_ms();
     store::touch_user(&state.db, &user_id);
     if state.hub.detach(&user_id, socket_id) {
-        state.hub.broadcast(&ServerEvent::Presence {
-            user_id: user_id.clone(),
-            presence: "offline",
-            last_seen: Some(now),
-        });
+        announce_presence(&state, &user_id);
     }
     writer.abort();
 }
@@ -520,11 +531,7 @@ fn handle_event(state: &AppState, user_id: &str, socket_id: u64, event: ClientEv
         ClientEvent::Presence { status } => {
             let presence = if status == "away" { "away" } else { "online" };
             state.hub.set_presence(user_id, socket_id, presence);
-            state.hub.broadcast(&ServerEvent::Presence {
-                user_id: user_id.to_string(),
-                presence: state.hub.presence_of(user_id),
-                last_seen: Some(now_ms()),
-            });
+            announce_presence(state, user_id);
         }
 
         ClientEvent::Send {
@@ -534,6 +541,27 @@ fn handle_event(state: &AppState, user_id: &str, socket_id: u64, event: ClientEv
             alert,
             attachment,
         } => send_message(state, user_id, socket_id, client_id, to, body, alert, attachment),
+
+        ClientEvent::Availability { availability } => {
+            store::set_availability(&state.db, user_id, &availability);
+            announce_presence(state, user_id);
+        }
+
+        ClientEvent::Operator { name } => {
+            store::set_operator(&state.db, user_id, name.as_deref());
+            announce_presence(state, user_id);
+        }
+
+        ClientEvent::History { with_user, before } => {
+            let before = if before > 0 { before } else { now_ms() };
+            let (messages, exhausted) =
+                store::history_before(&state.db, user_id, &with_user, before, PAGE_LIMIT);
+            state.hub.send_to_socket(
+                user_id,
+                socket_id,
+                &ServerEvent::History { with_user, messages, exhausted },
+            );
+        }
 
         ClientEvent::TaskAdd {
             owner,
@@ -614,6 +642,21 @@ fn handle_event(state: &AppState, user_id: &str, socket_id: u64, event: ClientEv
             );
         }
     }
+}
+
+/// One place that reports a room's live state, so it never drifts between
+/// the connect, disconnect and status-change paths.
+fn announce_presence(state: &AppState, user_id: &str) {
+    let Some(row) = store::find_by_id(&state.db, user_id) else {
+        return;
+    };
+    state.hub.broadcast(&ServerEvent::Presence {
+        user_id: user_id.to_string(),
+        presence: state.hub.presence_of(user_id),
+        availability: row.availability.clone(),
+        operator: row.operator.clone(),
+        last_seen: row.last_seen.or_else(|| Some(now_ms())),
+    });
 }
 
 fn error_to(state: &AppState, user_id: &str, socket_id: u64, code: &str, message: &str) {
@@ -717,12 +760,18 @@ fn send_message(
         return;
     };
 
-    state.hub.send_to(
-        &to,
-        &ServerEvent::Message {
-            message: message.clone(),
-        },
-    );
+    let channel = store::broadcast_room(&state.db).map(|r| r.id).unwrap_or_default();
+    if to == channel {
+        // The Alla channel reaches every room except the one that sent it,
+        // which gets an ack instead so its optimistic copy reconciles.
+        for room in state.hub.online_user_ids() {
+            if room != user_id {
+                state.hub.send_to(&room, &ServerEvent::Message { message: message.clone() });
+            }
+        }
+    } else {
+        state.hub.send_to(&to, &ServerEvent::Message { message: message.clone() });
+    }
     // Echo to the sender's other devices, and acknowledge on this one.
     state.hub.send_to_others(
         user_id,

@@ -12,7 +12,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use scrypt::{scrypt, Params};
 use sha2::{Digest, Sha256};
 
-use super::model::{initials_of, now_ms, Attachment, Message, OfficeInfo, OfficeMode, Task, User};
+use super::model::{
+    initials_of, now_ms, Attachment, Message, OfficeInfo, OfficeMode, Task, User,
+    BROADCAST_ROOM, DEFAULT_ROOMS,
+};
 
 /// Matches the Node relay: N=2^14, r=8, p=1, 64-byte output.
 const LOG_N: u8 = 14;
@@ -46,7 +49,12 @@ pub fn open(path: Option<&Path>) -> rusqlite::Result<Db> {
           pw_hash      TEXT NOT NULL,
           pw_salt      TEXT NOT NULL,
           created_at   INTEGER NOT NULL,
-          last_seen    INTEGER
+          last_seen    INTEGER,
+          -- A row is a room, not a person. "broadcast" is the Alla channel.
+          kind         TEXT NOT NULL DEFAULT 'room',
+          -- Who is working in this room right now, if anyone said so.
+          operator     TEXT,
+          availability TEXT NOT NULL DEFAULT 'available'
         );
 
         CREATE TABLE IF NOT EXISTS sessions (
@@ -176,6 +184,9 @@ pub struct UserRow {
     pub pw_hash: String,
     pub pw_salt: String,
     pub last_seen: Option<i64>,
+    pub kind: String,
+    pub operator: Option<String>,
+    pub availability: String,
 }
 
 impl UserRow {
@@ -187,6 +198,9 @@ impl UserRow {
             pw_hash: row.get("pw_hash")?,
             pw_salt: row.get("pw_salt")?,
             last_seen: row.get("last_seen")?,
+            kind: row.get("kind").unwrap_or_else(|_| "room".into()),
+            operator: row.get("operator").unwrap_or(None),
+            availability: row.get("availability").unwrap_or_else(|_| "available".into()),
         })
     }
 
@@ -197,6 +211,9 @@ impl UserRow {
             display_name: self.display_name.clone(),
             initials: initials_of(&self.display_name),
             presence,
+            availability: if self.availability == "busy" { "busy".into() } else { "available".into() },
+            operator: self.operator.clone(),
+            kind: if self.kind == "broadcast" { "broadcast".into() } else { "room".into() },
             last_seen: self.last_seen,
         }
     }
@@ -379,24 +396,71 @@ pub fn get_message(db: &Db, id: &str) -> Option<Message> {
     .flatten()
 }
 
-/// Recent history across every conversation, oldest first. Capped so a client
-/// that has been away for months still gets a small payload on connect.
+/// Recent history across every conversation, oldest first, including the Alla
+/// channel, which belongs to no single pair. Capped so a client that has been
+/// away for months still gets a small payload on connect.
 pub fn recent_history(db: &Db, user_id: &str, limit: i64) -> Vec<Message> {
+    let channel = broadcast_room(db).map(|r| r.id).unwrap_or_default();
     let conn = db.lock().unwrap();
     let sql = format!(
         "SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN files f ON f.id = m.file_id
-          WHERE m.from_id = ? OR m.to_id = ? ORDER BY m.sent_at DESC LIMIT ?"
+          WHERE m.from_id = ? OR m.to_id = ? OR m.to_id = ?
+          ORDER BY m.sent_at DESC LIMIT ?"
     );
     let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
     let mut out: Vec<Message> = stmt
-        .query_map(params![user_id, user_id, limit], message_from_row)
+        .query_map(params![user_id, user_id, channel, limit], message_from_row)
         .map(|r| r.filter_map(Result::ok).collect())
         .unwrap_or_default();
     out.reverse();
     out
+}
+
+/// One conversation's messages older than `before`, oldest first.
+///
+/// Connecting sends a recent slice; this is what a reader scrolling upwards
+/// pulls in behind it, so an office keeps its whole history without every
+/// client having to load all of it.
+pub fn history_before(
+    db: &Db,
+    user_id: &str,
+    peer_id: &str,
+    before: i64,
+    limit: i64,
+) -> (Vec<Message>, bool) {
+    let channel = broadcast_room(db).map(|r| r.id).unwrap_or_default();
+    let conn = db.lock().unwrap();
+
+    let sql = if peer_id == channel {
+        format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN files f ON f.id = m.file_id
+              WHERE m.to_id = ?1 AND m.sent_at < ?3 ORDER BY m.sent_at DESC LIMIT ?4"
+        )
+    } else {
+        format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN files f ON f.id = m.file_id
+              WHERE ((m.from_id = ?1 AND m.to_id = ?2) OR (m.from_id = ?2 AND m.to_id = ?1))
+                AND m.sent_at < ?3 ORDER BY m.sent_at DESC LIMIT ?4"
+        )
+    };
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(_) => return (Vec::new(), true),
+    };
+    // Parameter 1 is the peer for the channel query and the reader otherwise;
+    // both shapes bind the same four slots so the call site stays one path.
+    let first = if peer_id == channel { peer_id } else { user_id };
+    let mut out: Vec<Message> = stmt
+        .query_map(params![first, peer_id, before, limit], message_from_row)
+        .map(|r| r.filter_map(Result::ok).collect())
+        .unwrap_or_default();
+    let exhausted = (out.len() as i64) < limit;
+    out.reverse();
+    (out, exhausted)
 }
 
 pub fn mark_read(db: &Db, user_id: &str, peer: &str, up_to: i64) {
@@ -560,4 +624,109 @@ pub fn edit_task(db: &Db, id: &str, title: Option<&str>, notes: Option<&str>, du
 pub fn delete_task(db: &Db, id: &str) {
     let conn = db.lock().unwrap();
     let _ = conn.execute("DELETE FROM tasks WHERE id = ?", params![id]);
+}
+
+/* ------------------------------------------------------------------ */
+/* Rooms                                                               */
+/* ------------------------------------------------------------------ */
+
+/// Slug used for the UNIQUE constraint; nobody types or sees it.
+fn slug_of(name: &str) -> String {
+    let mut out = String::new();
+    let mut dash = false;
+    for c in name.to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+            dash = false;
+        } else if !dash && !out.is_empty() {
+            out.push('-');
+            dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-').chars().take(32).collect::<String>();
+    if trimmed.is_empty() { "rum".into() } else { trimmed }
+}
+
+pub fn find_room_by_name(db: &Db, display_name: &str) -> Option<UserRow> {
+    let conn = db.lock().unwrap();
+    conn.query_row(
+        "SELECT * FROM users WHERE display_name = ? COLLATE NOCASE",
+        params![display_name],
+        UserRow::from_row,
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
+pub fn broadcast_room(db: &Db) -> Option<UserRow> {
+    find_room_by_name(db, BROADCAST_ROOM)
+}
+
+pub fn create_room(db: &Db, display_name: &str, kind: &str) -> Option<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut username = slug_of(display_name);
+    {
+        let conn = db.lock().unwrap();
+        // A slug collision is possible ("Rum 1" and "rum-1"); make it unique
+        // rather than failing the join.
+        let taken: Option<i64> = conn
+            .query_row("SELECT 1 FROM users WHERE username = ?", params![username], |r| r.get(0))
+            .optional()
+            .ok()
+            .flatten();
+        if taken.is_some() {
+            username = format!("{username}-{}", &id[..4]);
+        }
+        conn.execute(
+            "INSERT INTO users (id, username, display_name, pw_hash, pw_salt, created_at, last_seen, kind)
+             VALUES (?, ?, ?, '', '', ?, NULL, ?)",
+            params![id, username, display_name, now_ms(), kind],
+        )
+        .ok()?;
+    }
+    Some(id)
+}
+
+/// Creates the rooms an office starts with, once.
+///
+/// The Alla channel is a room row too, flagged as a broadcast, so addressing
+/// it needs no special case anywhere a message is stored or read back.
+pub fn seed_rooms(db: &Db) {
+    if broadcast_room(db).is_none() {
+        create_room(db, BROADCAST_ROOM, "broadcast");
+    }
+    for name in DEFAULT_ROOMS {
+        if find_room_by_name(db, name).is_none() {
+            create_room(db, name, "room");
+        }
+    }
+}
+
+pub fn room_names(db: &Db) -> Vec<String> {
+    list_users(db)
+        .into_iter()
+        .filter(|r| r.kind != "broadcast")
+        .map(|r| r.display_name)
+        .collect()
+}
+
+pub fn set_availability(db: &Db, id: &str, availability: &str) {
+    let value = if availability == "busy" { "busy" } else { "available" };
+    let conn = db.lock().unwrap();
+    let _ = conn.execute(
+        "UPDATE users SET availability = ? WHERE id = ?",
+        params![value, id],
+    );
+}
+
+pub fn set_operator(db: &Db, id: &str, name: Option<&str>) {
+    let trimmed: Option<String> = name
+        .map(|n| n.trim().chars().take(64).collect::<String>())
+        .filter(|n| !n.is_empty());
+    let conn = db.lock().unwrap();
+    let _ = conn.execute(
+        "UPDATE users SET operator = ? WHERE id = ?",
+        params![trimmed, id],
+    );
 }

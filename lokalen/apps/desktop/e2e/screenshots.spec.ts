@@ -14,17 +14,17 @@ const OUT = "screenshots";
 const stamp = Date.now().toString(36);
 
 const PEOPLE = [
-  { displayName: `Elin Vikström ${stamp}` },
-  { displayName: `Marcus Berg ${stamp}` },
-  { displayName: `Priya Anand ${stamp}` },
-  { displayName: `Tomas Wikland ${stamp}` },
+  { displayName: "Reception", operator: "Elin" },
+  { displayName: "Behandlingsrum 1", operator: "Marcus" },
+  { displayName: "Behandlingsrum 2", operator: "Priya" },
 ];
 
 async function signUp(page: Page, who: (typeof PEOPLE)[number]) {
   await page.goto("/");
   await page.getByLabel("Kontorets server").fill(SERVER);
-  await page.getByLabel("Ditt namn").fill(who.displayName);
-  await page.getByRole("button", { name: "Gå med" }).click();
+  await page.getByLabel("Vilket rum är den här datorn i?").selectOption(who.displayName);
+  await page.getByLabel("Ditt namn (valfritt)").fill(who.operator);
+  await page.getByRole("button", { name: "Gå in i rummet" }).click();
   await expect(page.getByRole("heading", { name: "Kontoret" })).toBeVisible();
 }
 
@@ -42,7 +42,7 @@ test("fångar gränssnittet", async ({ browser }) => {
   await page.goto("/");
   await page.getByLabel("Kontorets server").fill(SERVER);
   // Let the office probe settle so the capture shows the resolved form.
-  await expect(page.getByText("Inget lösenord behövs")).toBeVisible();
+  await expect(page.getByText("Meddelanden visas från rummet")).toBeVisible();
   await page.screenshot({ path: `${OUT}/01-sign-in.png` });
 
   await signUp(page, PEOPLE[0]);
@@ -60,10 +60,10 @@ test("fångar gränssnittet", async ({ browser }) => {
   await expect(page.locator(".roster").getByRole("option").first()).toBeVisible();
 
   const marcus = others[0];
-  await page.locator(".roster").getByRole("option").filter({ hasText: "Marcus Berg" }).click();
+  await page.locator(".roster").getByRole("option").filter({ hasText: "Behandlingsrum 1" }).click();
 
   // A short exchange, so the log shows both sides and a grouped run.
-  await marcus.page.locator(".roster").getByRole("option").filter({ hasText: "Elin Vikström" }).click();
+  await marcus.page.locator(".roster").getByRole("option").filter({ hasText: "Reception" }).click();
 
   const say = async (from: Page, text: string) => {
     await from.getByLabel(/^Meddelande till /).fill(text);
@@ -95,7 +95,7 @@ test("fångar gränssnittet", async ({ browser }) => {
   };
   await addTask("Ringa leverantören om leveransen", "2030-01-08");
   await addTask("Skriva under avtalet", "2030-01-09");
-  await addTask("Boka konferensrummet", "", `Till Priya Anand ${stamp}`);
+  await addTask("Boka konferensrummet", "", "Till Behandlingsrum 2");
   await addTask("Beställa kaffe till fikarummet", "");  // personal: the recipient resets
   await page.locator(".task", { hasText: "Beställa kaffe" })
     .getByRole("button", { name: "Markera som klar" }).click();
@@ -133,10 +133,10 @@ test("fångar gränssnittet", async ({ browser }) => {
   const lightPage = await light.newPage();
   await lightPage.goto("/");
   await lightPage.getByLabel("Kontorets server").fill(SERVER);
-  await lightPage.getByLabel("Ditt namn").fill(PEOPLE[0].displayName);
-  await lightPage.getByRole("button", { name: "Gå med" }).click();
+  await lightPage.getByLabel("Vilket rum är den här datorn i?").selectOption(PEOPLE[0].displayName);
+  await lightPage.getByRole("button", { name: "Gå in i rummet" }).click();
   await expect(lightPage.getByRole("heading", { name: "Kontoret" })).toBeVisible();
-  await lightPage.locator(".roster").getByRole("option").filter({ hasText: "Marcus Berg" }).click();
+  await lightPage.locator(".roster").getByRole("option").filter({ hasText: "Behandlingsrum 1" }).click();
   await lightPage.waitForTimeout(600);
   await lightPage.screenshot({ path: `${OUT}/05-light.png` });
 
@@ -154,13 +154,13 @@ test("fångar gränssnittet", async ({ browser }) => {
   const phonePage = await phone.newPage();
   await phonePage.goto("/");
   await phonePage.getByLabel("Kontorets server").fill(SERVER);
-  await phonePage.getByLabel("Ditt namn").fill(PEOPLE[0].displayName);
-  await phonePage.getByRole("button", { name: "Gå med" }).click();
+  await phonePage.getByLabel("Vilket rum är den här datorn i?").selectOption(PEOPLE[0].displayName);
+  await phonePage.getByRole("button", { name: "Gå in i rummet" }).click();
   await expect(phonePage.getByRole("heading", { name: "Kontoret" })).toBeVisible();
   await phonePage.waitForTimeout(500);
   await phonePage.screenshot({ path: `${OUT}/06-phone-roster.png` });
 
-  await phonePage.locator(".roster").getByRole("option").filter({ hasText: "Marcus Berg" }).click();
+  await phonePage.locator(".roster").getByRole("option").filter({ hasText: "Behandlingsrum 1" }).click();
   await phonePage.waitForTimeout(600);
   await phonePage.screenshot({ path: `${OUT}/07-phone-conversation.png` });
 

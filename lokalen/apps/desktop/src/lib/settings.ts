@@ -3,6 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 export interface Settings {
   /** Play a tone when a message arrives. */
   sound: boolean;
+  /** The quick mute, reachable from every screen. Separate from `sound` so
+   *  silencing the app for ten minutes does not lose your real preference. */
+  muted: boolean;
   volume: number;
   /** Raise an OS notification when the window is not focused. */
   notifications: boolean;
@@ -13,7 +16,7 @@ export interface Settings {
   appearance: "flat" | "glass";
 }
 
-const DEFAULTS: Settings = { sound: true, volume: 0.7, notifications: true, appearance: "flat" };
+const DEFAULTS: Settings = { sound: true, muted: false, volume: 0.7, notifications: true, appearance: "flat" };
 const KEY = "lokalen.settings";
 
 function load(): Settings {
@@ -85,6 +88,39 @@ export function lastServerUrl(): string {
 export function rememberServerUrl(url: string) {
   try {
     localStorage.setItem("lokalen.server", url);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** The room this machine was last signed in as, and who was at it. */
+export function rememberedRoom(): string {
+  try {
+    return localStorage.getItem("lokalen.room") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function rememberRoom(room: string) {
+  try {
+    localStorage.setItem("lokalen.room", room);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function rememberedOperator(): string {
+  try {
+    return localStorage.getItem("lokalen.operator") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function rememberOperator(name: string) {
+  try {
+    localStorage.setItem("lokalen.operator", name);
   } catch {
     /* ignore */
   }

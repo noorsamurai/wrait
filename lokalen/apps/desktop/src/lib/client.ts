@@ -224,11 +224,31 @@ export class Realtime {
   }
 }
 
-/** Groups a flat history into per-peer conversations. */
-export function byConversation(messages: Message[], selfId: UserId): Map<UserId, Message[]> {
+/**
+ * Which conversation a message belongs to.
+ *
+ * Anything addressed to the broadcast channel belongs to the channel, whoever
+ * sent it. Without this, a message in Alla would land in the sender's own
+ * thread on every machine except the sender's.
+ */
+export function conversationOf(
+  message: Pick<Message, "from" | "to">,
+  selfId: UserId,
+  broadcastId: UserId | null,
+): UserId {
+  if (broadcastId && message.to === broadcastId) return broadcastId;
+  return message.from === selfId ? message.to : message.from;
+}
+
+/** Groups a flat history into per-conversation buckets. */
+export function byConversation(
+  messages: Message[],
+  selfId: UserId,
+  broadcastId: UserId | null = null,
+): Map<UserId, Message[]> {
   const map = new Map<UserId, Message[]>();
   for (const message of messages) {
-    const peer = message.from === selfId ? message.to : message.from;
+    const peer = conversationOf(message, selfId, broadcastId);
     const list = map.get(peer);
     if (list) list.push(message);
     else map.set(peer, [message]);

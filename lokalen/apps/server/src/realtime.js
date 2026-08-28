@@ -5,6 +5,7 @@ import {
   toUser, listUsers, findUserById, touchUser,
   insertMessage, getMessage, recentHistory, markRead,
   officeInfo, insertTask, getTask, tasksFor, updateTask, deleteTask,
+  broadcastRoom, setAvailability, setOperator, historyBefore,
 } from "./store.js";
 
 const HEARTBEAT_MS = 30_000;
@@ -94,9 +95,7 @@ export class Hub {
       office: officeInfo(this.db),
     });
 
-    if (wasOffline) {
-      this.broadcast({ t: "presence", userId: user.id, presence: "online", lastSeen: Date.now() });
-    }
+    if (wasOffline) this.#announcePresence(user.id);
 
     ws.on("message", (raw) => this.#onMessage(ws, raw));
     ws.on("close", () => this.#detach(ws));
@@ -128,6 +127,13 @@ export class Hub {
       case "typing": return void this.sendTo(event.to, { t: "typing", from: ws.userId });
       case "nudge":  return this.#onNudge(ws, event);
       case "read":   return this.#onRead(ws, event);
+      case "availability": {
+        const availability = event.availability === "busy" ? "busy" : "available";
+        setAvailability(this.db, ws.userId, availability);
+        return void this.#announcePresence(ws.userId);
+      }
+      case "operator":  return this.#onOperator(ws, event);
+      case "history":   return this.#onHistory(ws, event);
       case "presence": {
         ws.appPresence = event.status === "away" ? "away" : "online";
         return void this.broadcast({
@@ -176,7 +182,17 @@ export class Hub {
     insertMessage(this.db, record);
     const message = getMessage(this.db, record.id);
 
-    this.sendTo(event.to, { t: "message", message });
+    const channel = broadcastRoom(this.db);
+    if (channel && event.to === channel.id) {
+      // The Alla channel reaches every room except the one that sent it,
+      // which gets an ack instead so its optimistic copy reconciles.
+      for (const userId of this.sockets.keys()) {
+        if (userId !== ws.userId) this.sendTo(userId, { t: "message", message });
+      }
+    } else {
+      this.sendTo(event.to, { t: "message", message });
+    }
+
     // Echo to the sender's other devices, and acknowledge on this one.
     for (const socket of this.sockets.get(ws.userId) ?? []) {
       if (socket === ws) this.send(socket, { t: "ack", clientId: record.clientId, message });
@@ -252,6 +268,31 @@ export class Hub {
     for (const userId of new Set([task.owner, task.createdBy])) {
       this.sendTo(userId, { t: "taskRemoved", id: task.id });
     }
+  }
+
+  /** One place that reports a room's live state, so it never drifts. */
+  #announcePresence(userId) {
+    const row = findUserById(this.db, userId);
+    if (!row) return;
+    this.broadcast({
+      t: "presence",
+      userId,
+      presence: this.presenceOf(userId),
+      availability: row.availability === "busy" ? "busy" : "available",
+      operator: row.operator ?? null,
+      lastSeen: row.last_seen ?? Date.now(),
+    });
+  }
+
+  #onOperator(ws, event) {
+    setOperator(this.db, ws.userId, event.name);
+    this.#announcePresence(ws.userId);
+  }
+
+  #onHistory(ws, event) {
+    const before = Number.isFinite(event.before) ? event.before : Date.now();
+    const { messages, exhausted } = historyBefore(this.db, ws.userId, event.withUser, before);
+    this.send(ws, { t: "history", withUser: event.withUser, messages, exhausted });
   }
 
   #onNudge(ws, event) {

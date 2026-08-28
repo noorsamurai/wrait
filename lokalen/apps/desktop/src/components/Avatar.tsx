@@ -1,4 +1,4 @@
-import type { Presence, User } from "@lokalen/protocol";
+import type { Availability, Presence, User } from "@lokalen/protocol";
 
 /** Stable hue per person, derived from the id so it survives renames. */
 function hueOf(id: string): number {
@@ -8,12 +8,16 @@ function hueOf(id: string): number {
 }
 
 interface AvatarProps {
-  user: Pick<User, "id" | "initials" | "displayName">;
+  user: Pick<User, "id" | "initials" | "displayName"> & { kind?: User["kind"] };
   presence?: Presence;
+  /** Overrides the dot when someone is connected but with a patient. */
+  availability?: Availability;
   large?: boolean;
 }
 
-export function Avatar({ user, presence, large }: AvatarProps) {
+export function Avatar({ user, presence, availability, large }: AvatarProps) {
+  const dot =
+    presence && presence !== "offline" && availability === "busy" ? "busy" : presence;
   return (
     <div
       className={large ? "avatar avatar--lg" : "avatar"}
@@ -21,7 +25,7 @@ export function Avatar({ user, presence, large }: AvatarProps) {
       aria-hidden
     >
       {user.initials}
-      {presence ? <span className="avatar__dot" data-presence={presence} /> : null}
+      {presence ? <span className="avatar__dot" data-presence={dot} /> : null}
     </div>
   );
 }

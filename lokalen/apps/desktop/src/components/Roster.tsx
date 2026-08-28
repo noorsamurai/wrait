@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import type { Message, User, UserId } from "@lokalen/protocol";
+import type { Availability, Message, User, UserId } from "@lokalen/protocol";
 import { Avatar } from "./Avatar";
-import { GearIcon, ListIcon, SearchIcon } from "./icons";
+import { BellIcon, BellOffIcon, GearIcon, ListIcon, SearchIcon, UsersIcon } from "./icons";
 
 /** Relative last-seen text, coarse on purpose - nobody needs the seconds. */
 function lastSeenText(user: User): string {
@@ -39,21 +39,29 @@ interface RosterProps {
   onOpenSettings: () => void;
   onOpenTasks: () => void;
   openTaskCount: number;
+  /** This room's own state, shown and changed in the footer. */
+  availability: Availability;
+  onAvailability: (availability: Availability) => void;
+  muted: boolean;
+  onToggleMute: () => void;
 }
 
 export function Roster({
   self, users, threads, unread, typing, activePeer, connected, hidden, onSelect, onOpenSettings, onOpenTasks, openTaskCount,
+  availability, onAvailability, muted, onToggleMute,
 }: RosterProps) {
   const [query, setQuery] = useState("");
+
+  const channel = useMemo(() => users.find((u) => u.kind === "broadcast") ?? null, [users]);
 
   const people = useMemo(() => {
     const term = query.trim().toLowerCase();
     return users
-      .filter((u) => u.id !== self.id)
+      .filter((u) => u.id !== self.id && u.kind !== "broadcast")
       .filter((u) =>
         !term ||
         u.displayName.toLowerCase().includes(term) ||
-        u.username.toLowerCase().includes(term),
+        (u.operator ?? "").toLowerCase().includes(term),
       )
       .sort((a, b) => {
         // Unread first, then anyone online, then the most recent conversation.
@@ -99,18 +107,38 @@ export function Roster({
           <input
             className="field"
             style={{ paddingLeft: 36 }}
-            placeholder="Sök person"
+            placeholder="Sök rum"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            aria-label="Sök person"
+            aria-label="Sök rum"
           />
         </div>
       </div>
 
-      <div className="roster__list" role="listbox" aria-label="Personer">
+      <div className="roster__list" role="listbox" aria-label="Rum">
+        {channel && !query ? (
+          <button
+            className="person"
+            role="option"
+            aria-selected={channel.id === activePeer}
+            onClick={() => onSelect(channel.id)}
+          >
+            <span className="channel-mark" aria-hidden><UsersIcon size={16} /></span>
+            <span className="person__body">
+              <span className="person__name">{channel.displayName}</span>
+              <span className="person__meta">
+                {previewOf(threads[channel.id], self.id) ?? "Alla rum"}
+              </span>
+            </span>
+            {(unread[channel.id] ?? 0) > 0 ? (
+              <span className="badge">{unread[channel.id]}</span>
+            ) : null}
+          </button>
+        ) : null}
+
         {people.length === 0 ? (
           <p className="roster__empty">
-            {query ? "Ingen matchar det." : "Ingen annan har anslutit än."}
+            {query ? "Inget rum matchar det." : "Inga andra rum än."}
           </p>
         ) : (
           people.map((user) => {
@@ -125,11 +153,18 @@ export function Roster({
                 aria-selected={user.id === activePeer}
                 onClick={() => onSelect(user.id)}
               >
-                <Avatar user={user} presence={user.presence} />
+                <Avatar user={user} presence={user.presence} availability={user.availability} />
                 <span className="person__body">
-                  <span className="person__name">{user.displayName}</span>
+                  <span className="person__name">
+                    {user.displayName}
+                    {user.operator ? <span className="person__operator"> · {user.operator}</span> : null}
+                  </span>
                   <span className="person__meta">
-                    {isTyping ? "Skriver…" : preview ?? lastSeenText(user)}
+                    {isTyping
+                      ? "Skriver…"
+                      : user.availability === "busy" && user.presence !== "offline"
+                        ? "Med patient"
+                        : preview ?? lastSeenText(user)}
                   </span>
                 </span>
                 {count > 0 ? <span className="badge">{count > 99 ? "99+" : count}</span> : null}
@@ -140,14 +175,47 @@ export function Roster({
       </div>
 
       <div className="roster__foot">
-        <Avatar user={self} presence="online" />
-        <span className="person__body">
-          <span className="person__name">{self.displayName}</span>
-          <span className="person__meta">@{self.username}</span>
-        </span>
-        <button className="btn btn--icon" onClick={onOpenSettings} aria-label="Inställningar">
-          <GearIcon />
-        </button>
+        <div className="roster__self">
+          <Avatar user={self} presence="online" availability={availability} />
+          <span className="person__body">
+            <span className="person__name">{self.displayName}</span>
+            <span className="person__meta">
+              {self.operator ? self.operator : "Det här rummet"}
+            </span>
+          </span>
+          {/* Muting lives here rather than in settings: it has to be one
+              click from anywhere, which is the whole point of it. */}
+          <button
+            className="btn btn--icon"
+            onClick={onToggleMute}
+            aria-pressed={muted}
+            aria-label={muted ? "Slå på ljudet" : "Stäng av ljudet"}
+            title={muted ? "Ljudet är avstängt" : "Stäng av ljudet"}
+          >
+            {muted ? <BellOffIcon /> : <BellIcon />}
+          </button>
+          <button className="btn btn--icon" onClick={onOpenSettings} aria-label="Inställningar">
+            <GearIcon />
+          </button>
+        </div>
+
+        <div className="segmented segmented--status">
+          <button
+            type="button"
+            aria-selected={availability === "available"}
+            onClick={() => onAvailability("available")}
+          >
+            Tillgänglig
+          </button>
+          <button
+            type="button"
+            aria-selected={availability === "busy"}
+            onClick={() => onAvailability("busy")}
+            title="Stänger också av ljudet"
+          >
+            Med patient
+          </button>
+        </div>
       </div>
     </aside>
   );

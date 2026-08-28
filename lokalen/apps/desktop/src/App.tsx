@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Message } from "@lokalen/protocol";
 import { logout, type Session } from "./lib/client";
-import { loadSession, storeSession, useSettings } from "./lib/settings";
+import { loadSession, rememberedOperator, storeSession, useSettings } from "./lib/settings";
 import { unlockAudio } from "./lib/sound";
 import { useComms } from "./lib/useComms";
 import { Ambient } from "./components/Ambient";
@@ -30,6 +30,15 @@ export function App() {
       window.removeEventListener("keydown", arm);
     };
   }, []);
+
+  // Tell the office who is at this room, if the person said on sign-in.
+  useEffect(() => {
+    if (!comms.ready) return;
+    const remembered = rememberedOperator().trim();
+    if (remembered) comms.setOperator(remembered);
+    // Only on becoming ready: re-sending on every render would be chatter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comms.ready]);
 
   // Reflect unread count in the window title, so a background window still
   // says something useful in the taskbar or dock.
@@ -103,6 +112,10 @@ export function App() {
           onOpenSettings={() => setShowSettings(true)}
           onOpenTasks={() => setShowTasks((v) => !v)}
           openTaskCount={comms.openTaskCount}
+          availability={self.availability ?? "available"}
+          onAvailability={comms.setAvailability}
+          muted={settings.muted}
+          onToggleMute={() => updateSettings({ muted: !settings.muted })}
         />
 
         {comms.active ? (

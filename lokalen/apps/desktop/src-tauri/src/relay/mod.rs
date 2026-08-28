@@ -77,6 +77,8 @@ pub async fn start(
 ) -> Result<Relay, String> {
     let db = store::open(Some(&data_dir.join("lokalen.db"))).map_err(|e| e.to_string())?;
     store::init_office(&db, mode, office_name);
+    // Every office starts with its rooms and the Alla channel present.
+    store::seed_rooms(&db);
     let office = store::office_info(&db);
     let state = AppState {
         db,

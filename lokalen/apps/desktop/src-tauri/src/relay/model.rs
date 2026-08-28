@@ -11,14 +11,27 @@ pub const CHUNK_SIZE: u64 = 512 * 1024;
 pub const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// The rooms a new office starts with. A room is a place, not a person.
+pub const DEFAULT_ROOMS: [&str; 3] = ["Behandlingsrum 1", "Behandlingsrum 2", "Reception"];
+
+/// The channel every room can see.
+pub const BROADCAST_ROOM: &str = "Alla";
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
     pub id: String,
     pub username: String,
+    /// The room's name, e.g. "Behandlingsrum 1".
     pub display_name: String,
     pub initials: String,
     pub presence: &'static str,
+    /// "available" or "busy"; busy also silences that machine's own alerts.
+    pub availability: String,
+    /// Who is working in this room right now, if anyone said.
+    pub operator: Option<String>,
+    /// "room" or "broadcast".
+    pub kind: String,
     pub last_seen: Option<i64>,
 }
 
@@ -128,6 +141,19 @@ pub enum ClientEvent {
     },
     #[serde(rename = "presence")]
     Presence { status: String },
+    #[serde(rename = "availability")]
+    Availability { availability: String },
+    #[serde(rename = "operator")]
+    Operator {
+        #[serde(default)]
+        name: Option<String>,
+    },
+    #[serde(rename = "history")]
+    History {
+        with_user: String,
+        #[serde(default)]
+        before: i64,
+    },
     #[serde(rename = "taskAdd")]
     TaskAdd {
         #[serde(default)]
@@ -188,7 +214,15 @@ pub enum ServerEvent {
     Presence {
         user_id: String,
         presence: &'static str,
+        availability: String,
+        operator: Option<String>,
         last_seen: Option<i64>,
+    },
+    #[serde(rename = "history")]
+    History {
+        with_user: String,
+        messages: Vec<Message>,
+        exhausted: bool,
     },
     #[serde(rename = "roster")]
     Roster { users: Vec<User> },

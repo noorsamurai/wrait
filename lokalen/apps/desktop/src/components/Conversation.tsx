@@ -109,17 +109,23 @@ export function Conversation({
         </button>
         <Avatar user={peer} presence={peer.presence} large />
         <div className="chat__head-body">
-          <div className="chat__head-name">{peer.displayName}</div>
+          <div className="chat__head-name">
+            {peer.displayName}
+            {peer.operator ? <span className="person__operator"> · {peer.operator}</span> : null}
+          </div>
           <div className="chat__head-meta">
             {typing
               ? "Skriver…"
-              : peer.presence === "online"
-                ? "Online"
-                : peer.presence === "away"
-                  ? "Borta"
-                  : "Offline"}
+              : peer.kind === "broadcast"
+                ? "Alla rum"
+                : peer.presence === "offline"
+                  ? "Offline"
+                  : peer.availability === "busy"
+                    ? "Med patient"
+                    : "Online"}
           </div>
         </div>
+        {peer.kind === "broadcast" ? null : (
         <button
           className="btn"
           onClick={nudge}
@@ -129,12 +135,15 @@ export function Conversation({
           <BellIcon size={15} />
           {nudgeSent ? "Puffad" : "Puffa"}
         </button>
+        )}
       </header>
 
       <div className="chat__log" ref={log} onScroll={onScroll}>
         {messages.length === 0 ? (
           <p className="chat__empty">
-            Här börjar din konversation med {peer.displayName}.
+            {peer.kind === "broadcast"
+              ? "Allt som skrivs här syns i alla rum."
+              : `Här börjar din konversation med ${peer.displayName}.`}
             <br />
             Släpp en fil var som helst här för att skicka den.
           </p>
@@ -162,7 +171,7 @@ export function Conversation({
       <Composer
         session={session}
         peer={peer.id}
-        peerName={peer.displayName.split(" ")[0]}
+        peerName={peer.displayName}
         onSend={onSend}
         onTyping={onTyping}
         droppedFile={droppedFile}

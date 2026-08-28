@@ -133,6 +133,11 @@ impl Hub {
             .collect()
     }
 
+    /// Every user id with at least one open socket.
+    pub fn online_user_ids(&self) -> Vec<String> {
+        self.sockets.lock().unwrap().keys().cloned().collect()
+    }
+
     pub fn online_count(&self) -> usize {
         self.sockets.lock().unwrap().len()
     }

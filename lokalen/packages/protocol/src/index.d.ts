@@ -5,13 +5,32 @@ export declare const MAX_FILE_BYTES: number;
 export type UserId = string;
 export type Presence = "online" | "away" | "offline";
 
+/**
+ * What someone has set themselves to.
+ *
+ * Deliberately two states. "busy" also silences that machine's own alerts:
+ * being with a patient is exactly when you least want a chime.
+ */
+export type Availability = "available" | "busy";
+
+/** A room is a place, not a person. "broadcast" is the Alla channel. */
+export type StationKind = "room" | "broadcast";
+
 export interface User {
   id: UserId;
   username: string;
+  /** The room's name, e.g. "Behandlingsrum 1". */
   displayName: string;
   /** Two-letter monogram rendered when there is no avatar. */
   initials: string;
   presence: Presence;
+  availability: Availability;
+  /**
+   * Who is currently working at this room, if anyone said. Messages still
+   * show the room when nobody has: the room is the identity.
+   */
+  operator: string | null;
+  kind: StationKind;
   /** Epoch ms of the last socket activity, or null if never connected. */
   lastSeen: number | null;
 }
@@ -50,11 +69,20 @@ export interface OfficeInfo {
   name: string;
   mode: OfficeMode;
   version: number;
+  /** The rooms this office was set up with, offered as a pick-list. */
+  rooms?: string[];
 }
 
 export interface JoinRequest {
+  /** The room this machine is in. */
   displayName: string;
 }
+
+/** The rooms an office was set up with, offered on the sign-in screen. */
+export declare const DEFAULT_ROOMS: string[];
+
+/** The reserved name of the channel every room sees. */
+export declare const BROADCAST_ROOM: string;
 
 /* ------------------------------------------------------------------ */
 /* Tasks                                                               */
@@ -128,6 +156,11 @@ export type ClientEvent =
   | { t: "read"; withUser: UserId; upTo: number }
   | { t: "nudge"; to: UserId }
   | { t: "presence"; status: Exclude<Presence, "offline"> }
+  | { t: "availability"; availability: Availability }
+  /** Sets, or clears with null, who is working in this room right now. */
+  | { t: "operator"; name: string | null }
+  /** Asks for messages older than `before` in one conversation. */
+  | { t: "history"; withUser: UserId; before: number }
   | { t: "ping" };
 
 export type ServerEvent =
@@ -144,7 +177,16 @@ export type ServerEvent =
   | { t: "taskRemoved"; id: string }
   | { t: "message"; message: Message }
   | { t: "ack"; clientId: string; message: Message }
-  | { t: "presence"; userId: UserId; presence: Presence; lastSeen: number | null }
+  | {
+      t: "presence";
+      userId: UserId;
+      presence: Presence;
+      availability?: Availability;
+      operator?: string | null;
+      lastSeen: number | null;
+    }
+  /** Older messages, oldest first, in response to a "history" request. */
+  | { t: "history"; withUser: UserId; messages: Message[]; exhausted: boolean }
   | { t: "roster"; users: User[] }
   | { t: "typing"; from: UserId }
   | { t: "read"; from: UserId; upTo: number }

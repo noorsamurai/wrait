@@ -3,7 +3,10 @@ import {
   validateCredentials, hashPassword, verifyPassword,
   createSession, resolveSession, destroySession, newId,
 } from "./auth.js";
-import { toUser, findUserByUsername, findUserById, officeInfo, listUsers } from "./store.js";
+import {
+  toUser, findUserByUsername, findUserById, officeInfo, listUsers,
+  findRoomByName, createRoom,
+} from "./store.js";
 import { initUpload, getFile, receivedChunks, writeChunk, openDownload, HttpError } from "./files.js";
 import { initialsOf, MAX_FILE_BYTES } from "@lokalen/protocol";
 
@@ -85,7 +88,16 @@ export function createRequestHandler({ db, dataDir, hub, allowOrigin = "*" }) {
 
       // Public: a client needs to know which sign-in screen to show before it
       // has any credentials.
-      if (path === "/api/office" && req.method === "GET") return json(res, 200, officeInfo(db));
+      if (path === "/api/office" && req.method === "GET") {
+        // The sign-in screen offers these as a pick-list: you choose the room
+        // this machine is in, not a personal account.
+        return json(res, 200, {
+          ...officeInfo(db),
+          rooms: listUsers(db)
+            .filter((row) => row.kind !== "broadcast")
+            .map((row) => row.display_name),
+        });
+      }
 
       if (path === "/api/join" && req.method === "POST") return await join(req, res);
 
@@ -125,34 +137,39 @@ export function createRequestHandler({ db, dataDir, hub, allowOrigin = "*" }) {
    * same person on a new machine keeps their history - but only while nobody
    * is signed in under it, so two people cannot hold one identity at once.
    */
+  /**
+   * Signs this machine in as a room.
+   *
+   * A room already in the office is taken over rather than duplicated, so the
+   * reception PC restarting keeps Reception's history - but only while nobody
+   * else holds it, since two machines must not both be Behandlingsrum 1.
+   */
   async function join(req, res) {
     if (officeInfo(db).mode !== "open") {
       throw new HttpError(403, "closed", "Det här kontoret kräver ett konto.");
     }
 
     const displayName = String((await readJson(req)).displayName ?? "").trim().slice(0, 64);
-    if (!displayName) throw new HttpError(400, "invalid", "Skriv ett namn.");
+    if (!displayName) throw new HttpError(400, "invalid", "Välj ett rum.");
 
-    const existing = listUsers(db).find(
-      (row) => row.display_name.toLowerCase() === displayName.toLowerCase()
-    );
+    const existing = findRoomByName(db, displayName);
 
     if (existing) {
+      if (existing.kind === "broadcast") {
+        throw new HttpError(400, "invalid", "Det går inte att logga in som en kanal.");
+      }
       if (hub.presenceOf(existing.id) !== "offline") {
-        throw new HttpError(409, "name_taken", "Någon använder det namnet just nu. Välj ett annat.");
+        throw new HttpError(
+          409,
+          "room_taken",
+          "En annan dator är redan inloggad som det rummet."
+        );
       }
       const token = createSession(db, existing.id);
       return json(res, 200, { token, user: toUser(existing, "offline") });
     }
 
-    // A synthetic username keeps the UNIQUE constraint meaningful without
-    // asking anyone to invent one.
-    const id = newId();
-    db.prepare(
-      `INSERT INTO users (id, username, display_name, pw_hash, pw_salt, created_at, last_seen)
-       VALUES (?, ?, ?, '', '', ?, NULL)`
-    ).run(id, `gast-${id.slice(0, 8)}`, displayName, Date.now());
-
+    const id = createRoom(db, displayName);
     const token = createSession(db, id);
     hub.broadcast({ t: "roster", users: hub.roster() });
     return json(res, 201, { token, user: toUser(findUserById(db, id), "offline") });

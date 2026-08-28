@@ -3,7 +3,9 @@ import type { OfficeInfo } from "@lokalen/protocol";
 import {
   ApiError, fetchOffice, joinByName, login, normaliseServerUrl, register, type Session,
 } from "../lib/client";
-import { lastServerUrl, rememberServerUrl } from "../lib/settings";
+import {
+  lastServerUrl, rememberServerUrl, rememberedOperator, rememberOperator, rememberedRoom, rememberRoom,
+} from "../lib/settings";
 import {
   discoverOffices, isNative, relayStatus, startRelay,
   type DiscoveredOffice, type RelayInfo,
@@ -15,6 +17,8 @@ type Mode = "signin" | "register";
 export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void }) {
   const [mode, setMode] = useState<Mode>("signin");
   const [server, setServer] = useState(lastServerUrl() || "http://localhost:8787");
+  const [room, setRoom] = useState("");
+  const [operator, setOperator] = useState(rememberedOperator());
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -66,7 +70,12 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
       setProbing(true);
       try {
         const info = await fetchOffice(url);
-        if (!cancelled) setOffice(info);
+        if (cancelled) return;
+        setOffice(info);
+        // Pre-select the room this machine used last time, so a restart is
+        // one click rather than a decision.
+        const rooms = info.rooms ?? [];
+        setRoom((current) => current || (rooms.includes(rememberedRoom()) ? rememberedRoom() : rooms[0] ?? ""));
       } catch {
         // Unreachable or not a Lokalen server: leave the form as it was and
         // let the actual sign-in attempt produce the error message.
@@ -112,12 +121,16 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
     try {
       const serverUrl = normaliseServerUrl(server);
       const result = open
-          ? await joinByName(serverUrl, name)
+          ? await joinByName(serverUrl, room)
           : mode === "register"
             ? await register(serverUrl, { username, displayName: name || username, password })
             : await login(serverUrl, { username, password });
 
       rememberServerUrl(serverUrl);
+      if (open) {
+        rememberRoom(room);
+        rememberOperator(operator);
+      }
       onSignedIn({ serverUrl, token: result.token, user: result.user });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Något gick fel. Försök igen.");
@@ -126,7 +139,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
     }
   }
 
-  const canSubmit = open ? name.trim().length > 0 : username.trim().length > 0 && password.length > 0;
+  const canSubmit = open ? room.trim().length > 0 : username.trim().length > 0 && password.length > 0;
 
   return (
     <div className="signin">
@@ -208,21 +221,42 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
           </div>
 
           {open ? (
-            <div>
-              <label className="label" htmlFor="name">Ditt namn</label>
-              <input
-                id="name"
-                className="field"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Anna Lindqvist"
-                autoComplete="name"
-                required
-              />
-              <p className="row__hint" style={{ marginTop: 6 }}>
-                {probing ? "Kontrollerar kontoret…" : "Inget lösenord behövs på det här kontoret."}
-              </p>
-            </div>
+            <>
+              <div>
+                <label className="label" htmlFor="room">Vilket rum är den här datorn i?</label>
+                <select
+                  id="room"
+                  className="field"
+                  value={room}
+                  onChange={(e) => setRoom(e.target.value)}
+                  required
+                >
+                  {(office?.rooms ?? []).map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+                <p className="row__hint" style={{ marginTop: 6 }}>
+                  {probing
+                    ? "Kontrollerar kontoret…"
+                    : "Meddelanden visas från rummet, så det spelar ingen roll vem som sitter här."}
+                </p>
+              </div>
+
+              <div>
+                <label className="label" htmlFor="operator">Ditt namn (valfritt)</label>
+                <input
+                  id="operator"
+                  className="field"
+                  value={operator}
+                  onChange={(e) => setOperator(e.target.value)}
+                  placeholder="Anna"
+                  autoComplete="name"
+                />
+                <p className="row__hint" style={{ marginTop: 6 }}>
+                  Visas som tillägg till rummet. Lämna tomt om du vill.
+                </p>
+              </div>
+            </>
           ) : (
             <>
               <div>
@@ -279,7 +313,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void 
             disabled={busy || probing || !canSubmit}
             style={{ marginTop: 4 }}
           >
-            {busy ? "Arbetar…" : open ? "Gå med" : mode === "register" ? "Skapa konto" : "Logga in"}
+            {busy ? "Arbetar…" : open ? "Gå in i rummet" : mode === "register" ? "Skapa konto" : "Logga in"}
           </button>
 
           {isNative() ? (

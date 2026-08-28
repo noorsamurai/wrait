@@ -8,19 +8,23 @@ const SERVER = "http://127.0.0.1:8788";
 
 /** Each run gets fresh usernames so the suite is re-runnable against one relay. */
 const stamp = Date.now().toString(36);
-const ANNA = { displayName: `Anna Lindqvist ${stamp}` };
-const BJORN = { displayName: `Björn Ortiz ${stamp}` };
+const ANNA = { room: "Behandlingsrum 1", operator: "Anna" };
+const BJORN = { room: "Reception", operator: "Björn" };
 
-/** The office runs in open mode, so joining is a name and nothing else. */
-async function joinOffice(page: Page, who: { displayName: string }) {
+/**
+ * A machine signs in as the room it stands in, optionally naming who is at
+ * it. There is no password anywhere in an open office.
+ */
+async function joinOffice(page: Page, who: { room: string; operator: string }) {
   await page.goto("/");
   await page.getByLabel("Kontorets server").fill(SERVER);
-  await page.getByLabel("Ditt namn").fill(who.displayName);
-  await page.getByRole("button", { name: "Gå med" }).click();
+  await page.getByLabel("Vilket rum är den här datorn i?").selectOption(who.room);
+  await page.getByLabel("Ditt namn (valfritt)").fill(who.operator);
+  await page.getByRole("button", { name: "Gå in i rummet" }).click();
   await expect(page.getByRole("heading", { name: "Kontoret" })).toBeVisible();
 }
 
-test("två personer går med på namn, chattar, larmar och byter fil", async ({ browser }) => {
+test("två rum chattar, larmar och byter fil", async ({ browser }) => {
   // Separate contexts: two different machines, two different localStorage jars.
   const alice = await browser.newContext();
   const bob = await browser.newContext();
@@ -32,11 +36,11 @@ test("två personer går med på namn, chattar, larmar och byter fil", async ({ 
 
   // Anna's roster should list Björn once he exists.
   await a.reload();
-  await expect(a.getByRole("option", { name: new RegExp(BJORN.displayName) })).toBeVisible();
+  await expect(a.getByRole("option", { name: new RegExp(BJORN.room) })).toBeVisible();
 
-  await a.getByRole("option", { name: new RegExp(BJORN.displayName) }).click();
+  await a.getByRole("option", { name: new RegExp(BJORN.room) }).click();
   await expect(
-    a.locator(".chat__empty").getByText(BJORN.displayName, { exact: false }),
+    a.locator(".chat__empty").getByText(BJORN.room, { exact: false }),
   ).toBeVisible();
 
   await test.step("ett vanligt meddelande kommer fram", async () => {
@@ -47,7 +51,7 @@ test("två personer går med på namn, chattar, larmar och byter fil", async ({ 
     await expect(a.locator(".chat__log").getByText("Avstämning om fem?")).toBeVisible();
 
     // Björn has not opened the thread, so it should surface as unread.
-    const annaRow = b.getByRole("option").filter({ hasText: ANNA.displayName });
+    const annaRow = b.getByRole("option").filter({ hasText: ANNA.room });
     await expect(annaRow.locator(".badge")).toHaveText("1");
 
     await annaRow.click();

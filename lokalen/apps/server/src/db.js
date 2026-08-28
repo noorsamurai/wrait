@@ -22,7 +22,12 @@ export function openDatabase(file) {
       pw_hash      TEXT NOT NULL,
       pw_salt      TEXT NOT NULL,
       created_at   INTEGER NOT NULL,
-      last_seen    INTEGER
+      last_seen    INTEGER,
+      -- A row is a room, not a person. "broadcast" is the Alla channel.
+      kind         TEXT NOT NULL DEFAULT 'room',
+      -- Who is working in this room right now, if anyone said so.
+      operator     TEXT,
+      availability TEXT NOT NULL DEFAULT 'available'
     );
 
     CREATE TABLE IF NOT EXISTS sessions (

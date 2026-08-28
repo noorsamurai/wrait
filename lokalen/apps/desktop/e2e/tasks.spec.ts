@@ -1,15 +1,14 @@
 import { test, expect, type Page } from "@playwright/test";
 
 const SERVER = "http://127.0.0.1:8788";
-const stamp = Date.now().toString(36);
-const ANNA = `Anna Uppgift ${stamp}`;
-const BJORN = `Björn Uppgift ${stamp}`;
+const ANNA = "Behandlingsrum 2";
+const BJORN = "Reception";
 
-async function joinOffice(page: Page, displayName: string) {
+async function joinOffice(page: Page, room: string) {
   await page.goto("/");
   await page.getByLabel("Kontorets server").fill(SERVER);
-  await page.getByLabel("Ditt namn").fill(displayName);
-  await page.getByRole("button", { name: "Gå med" }).click();
+  await page.getByLabel("Vilket rum är den här datorn i?").selectOption(room);
+  await page.getByRole("button", { name: "Gå in i rummet" }).click();
   await expect(page.getByRole("heading", { name: "Kontoret" })).toBeVisible();
 }
 
