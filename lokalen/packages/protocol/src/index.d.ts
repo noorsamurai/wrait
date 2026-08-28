@@ -177,6 +177,8 @@ export type ClientEvent =
   | { t: "taskDelete"; id: string }
   | { t: "messageEdit"; id: string; body: string }
   | { t: "messageDelete"; id: string }
+  /** Searches the plain text of everything this room can see. */
+  | { t: "search"; query: string }
   | { t: "typing"; to: UserId }
   | { t: "read"; withUser: UserId; upTo: number }
   | { t: "nudge"; to: UserId }
@@ -201,6 +203,7 @@ export type ServerEvent =
   | { t: "task"; task: Task }
   /** A message changed in place: edited, or deleted and left as a tombstone. */
   | { t: "messageUpdated"; message: Message }
+  | { t: "searchResults"; query: string; messages: Message[] }
   | { t: "taskRemoved"; id: string }
   | { t: "message"; message: Message }
   | { t: "ack"; clientId: string; message: Message }

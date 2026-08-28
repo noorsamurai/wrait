@@ -9,6 +9,7 @@ import { Ambient } from "./components/Ambient";
 import { Conversation } from "./components/Conversation";
 import { Roster } from "./components/Roster";
 import { TaskPanel } from "./components/TaskPanel";
+import { SearchPanel } from "./components/SearchPanel";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { SignIn } from "./components/SignIn";
 
@@ -17,6 +18,7 @@ export function App() {
   const [settings, updateSettings] = useSettings();
   const [showSettings, setShowSettings] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
 
   const comms = useComms(session, settings);
 
@@ -99,7 +101,7 @@ export function App() {
       <Ambient />
       {comms.nudgedBy ? <div className="nudge-flash" /> : null}
 
-      <div className="app" data-tasks={showTasks ? "open" : "closed"}>
+      <div className="app" data-tasks={showTasks || showSearch ? "open" : "closed"}>
         <Roster
           self={self}
           users={comms.users}
@@ -111,7 +113,8 @@ export function App() {
           hidden={onPhoneWithChatOpen}
           onSelect={comms.openConversation}
           onOpenSettings={() => setShowSettings(true)}
-          onOpenTasks={() => setShowTasks((v) => !v)}
+          onOpenTasks={() => { setShowTasks((v) => !v); setShowSearch(false); }}
+          onOpenSearch={() => { setShowSearch((v) => !v); setShowTasks(false); }}
           openTaskCount={comms.openTaskCount}
           availability={self.availability ?? "available"}
           onAvailability={comms.setAvailability}
@@ -149,6 +152,20 @@ export function App() {
             </p>
           </section>
         )}
+
+        {showSearch ? (
+          <SearchPanel
+            self={self}
+            users={comms.users}
+            results={comms.search}
+            onSearch={comms.search_}
+            onOpen={(peer) => {
+              comms.openConversation(peer);
+              setShowSearch(false);
+            }}
+            onClose={() => { setShowSearch(false); comms.clearSearch(); }}
+          />
+        ) : null}
 
         {showTasks ? (
           <TaskPanel

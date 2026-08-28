@@ -72,16 +72,36 @@ export function touchUser(db, id, at = Date.now()) {
   db.prepare("UPDATE users SET last_seen = ? WHERE id = ?").run(at, id);
 }
 
+/**
+ * The words of a message, folded for searching.
+ *
+ * Bodies carry pasted formatting, so the markup is stripped first; folding is
+ * done here rather than in SQL because SQLite's lower() only handles ASCII
+ * and would leave Å, Ä and Ö unmatched.
+ */
+export function searchableText(body) {
+  return String(body ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 export function insertMessage(db, message) {
   db.prepare(
-    `INSERT INTO messages (id, client_id, from_id, to_id, body, alert, file_id, sent_at, read_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+    `INSERT INTO messages (id, client_id, from_id, to_id, body, body_plain, alert, file_id, sent_at, read_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
   ).run(
     message.id,
     message.clientId,
     message.from,
     message.to,
     message.body,
+    searchableText(message.body),
     message.alert ? 1 : 0,
     message.attachment ? message.attachment.fileId : null,
     message.sentAt
@@ -321,7 +341,12 @@ export function editMessage(db, id, body) {
     current.body,
     at
   );
-  db.prepare("UPDATE messages SET body = ?, edited_at = ? WHERE id = ?").run(body, at, id);
+  db.prepare("UPDATE messages SET body = ?, body_plain = ?, edited_at = ? WHERE id = ?").run(
+    body,
+    searchableText(body),
+    at,
+    id
+  );
 }
 
 /**
@@ -334,6 +359,34 @@ export function editMessage(db, id, body) {
 export function deleteMessage(db, id) {
   db.prepare("DELETE FROM message_revisions WHERE message_id = ?").run(id);
   db.prepare(
-    "UPDATE messages SET body = '', file_id = NULL, deleted_at = ? WHERE id = ?"
+    "UPDATE messages SET body = '', body_plain = '', file_id = NULL, deleted_at = ? WHERE id = ?"
   ).run(Date.now(), id);
+}
+
+/**
+ * Messages this room can see, matching every word of the query.
+ *
+ * Terms are ANDed so "remiss anna" narrows rather than widens, which is what
+ * someone hunting for one message expects.
+ */
+export function searchMessages(db, userId, query, limit = 60) {
+  const terms = searchableText(query).split(" ").filter(Boolean).slice(0, 6);
+  if (terms.length === 0) return [];
+
+  const channel = broadcastRoom(db);
+  const conditions = terms.map(() => "m.body_plain LIKE ?").join(" AND ");
+  const values = terms.map((term) => `%${term}%`);
+
+  const rows = db
+    .prepare(
+      `SELECT ${MESSAGE_COLUMNS} FROM messages m
+         LEFT JOIN files f ON f.id = m.file_id
+        WHERE (m.from_id = ? OR m.to_id = ? OR m.to_id = ?)
+          AND m.deleted_at IS NULL
+          AND ${conditions}
+        ORDER BY m.sent_at DESC LIMIT ?`
+    )
+    .all(userId, userId, channel ? channel.id : "", ...values, limit);
+
+  return rows.map((row) => toMessage(row));
 }

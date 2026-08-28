@@ -85,8 +85,12 @@ export function openDatabase(file) {
       sent_at   INTEGER NOT NULL,
       read_at   INTEGER,
       edited_at INTEGER,
-      deleted_at INTEGER
+      deleted_at INTEGER,
+      -- Lower-cased plain text of the body, kept alongside it so search can
+      -- match what people read rather than the markup they never see.
+      body_plain TEXT NOT NULL DEFAULT ''
     );
+    CREATE INDEX IF NOT EXISTS messages_search ON messages(body_plain);
 
     -- Every earlier wording of an edited message, so the original stays
     -- recallable by both the sender and the recipient.

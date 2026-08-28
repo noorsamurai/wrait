@@ -111,8 +111,12 @@ pub fn open(path: Option<&Path>) -> rusqlite::Result<Db> {
           sent_at   INTEGER NOT NULL,
           read_at   INTEGER,
           edited_at INTEGER,
-          deleted_at INTEGER
+          deleted_at INTEGER,
+          -- Lower-cased plain text of the body, kept alongside it so search
+          -- matches what people read rather than the markup they never see.
+          body_plain TEXT NOT NULL DEFAULT ''
         );
+        CREATE INDEX IF NOT EXISTS messages_search ON messages(body_plain);
 
         -- Every earlier wording of an edited message, so the original stays
         -- recallable by both the sender and the recipient.
@@ -377,6 +381,32 @@ fn message_from_row(row: &rusqlite::Row) -> rusqlite::Result<Message> {
     })
 }
 
+/// The words of a message, folded for searching.
+///
+/// Bodies carry pasted formatting, so the markup is stripped first; folding
+/// happens here rather than in SQL because SQLite's lower() only handles
+/// ASCII and would leave Å, Ä and Ö unmatched.
+pub fn searchable_text(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut in_tag = false;
+    for c in body.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if in_tag => {}
+            _ => out.push(c),
+        }
+    }
+    out.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
 pub fn insert_message(
     db: &Db,
     client_id: Option<&str>,
@@ -390,9 +420,12 @@ pub fn insert_message(
     {
         let conn = db.lock().unwrap();
         conn.execute(
-            "INSERT INTO messages (id, client_id, from_id, to_id, body, alert, file_id, sent_at, read_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
-            params![id, client_id, from, to, body, alert as i64, file_id, now_ms()],
+            "INSERT INTO messages (id, client_id, from_id, to_id, body, body_plain, alert, file_id, sent_at, read_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            params![
+                id, client_id, from, to, body, searchable_text(body),
+                alert as i64, file_id, now_ms()
+            ],
         )
         .ok()?;
     }
@@ -788,8 +821,8 @@ pub fn edit_message(db: &Db, id: &str, body: &str) {
         params![id, current, at],
     );
     let _ = conn.execute(
-        "UPDATE messages SET body = ?, edited_at = ? WHERE id = ?",
-        params![body, at, id],
+        "UPDATE messages SET body = ?, body_plain = ?, edited_at = ? WHERE id = ?",
+        params![body, searchable_text(body), at, id],
     );
 }
 
@@ -802,7 +835,50 @@ pub fn delete_message(db: &Db, id: &str) {
     let conn = db.lock().unwrap();
     let _ = conn.execute("DELETE FROM message_revisions WHERE message_id = ?", params![id]);
     let _ = conn.execute(
-        "UPDATE messages SET body = '', file_id = NULL, deleted_at = ? WHERE id = ?",
+        "UPDATE messages SET body = '', body_plain = '', file_id = NULL, deleted_at = ? WHERE id = ?",
         params![now_ms(), id],
     );
+}
+
+/// Messages this room can see, matching every word of the query.
+///
+/// Terms are ANDed so "remiss anna" narrows rather than widens, which is what
+/// someone hunting for one message expects.
+pub fn search_messages(db: &Db, user_id: &str, query: &str, limit: i64) -> Vec<Message> {
+    let folded = searchable_text(query);
+    let terms: Vec<String> = folded.split_whitespace().take(6).map(|t| format!("%{t}%")).collect();
+    if terms.is_empty() {
+        return Vec::new();
+    }
+
+    let channel = broadcast_room(db).map(|r| r.id).unwrap_or_default();
+    let conditions = vec!["m.body_plain LIKE ?"; terms.len()].join(" AND ");
+    let sql = format!(
+        "SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN files f ON f.id = m.file_id
+          WHERE (m.from_id = ? OR m.to_id = ? OR m.to_id = ?)
+            AND m.deleted_at IS NULL AND {conditions}
+          ORDER BY m.sent_at DESC LIMIT ?"
+    );
+
+    let conn = db.lock().unwrap();
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+
+    // Bind the three audience ids, then one pattern per term, then the limit.
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![
+        Box::new(user_id.to_string()),
+        Box::new(user_id.to_string()),
+        Box::new(channel),
+    ];
+    for term in terms {
+        values.push(Box::new(term));
+    }
+    values.push(Box::new(limit));
+
+    let refs: Vec<&dyn rusqlite::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+    stmt.query_map(refs.as_slice(), message_from_row)
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
 }

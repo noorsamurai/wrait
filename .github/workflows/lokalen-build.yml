@@ -57,6 +57,10 @@ jobs:
   windows:
     name: Windows
     runs-on: windows-latest
+    env:
+      # Read once here so the signing step can branch on its presence: a
+      # secret cannot be tested directly in an `if` expression.
+      CERT: ${{ secrets.WINDOWS_CERT_BASE64 }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -73,7 +77,35 @@ jobs:
           workspaces: lokalen/apps/desktop/src-tauri
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @lokalen/desktop tauri build
+
+      # Signing is optional: without a certificate the build still runs and
+      # produces an unsigned exe, which is what SmartScreen warns about.
+      - name: Import the signing certificate
+        id: cert
+        if: ${{ env.CERT != '' }}
+        env:
+          CERT: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        working-directory: .
+        run: |
+          $bytes = [Convert]::FromBase64String($env:CERT)
+          $path = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes($path, $bytes)
+          $password = ConvertTo-SecureString -String $env:CERT_PASSWORD -AsPlainText -Force
+          $imported = Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $path -Force
+          "thumbprint=$($imported.Thumbprint)" >> $env:GITHUB_OUTPUT
+
+      - name: Build (signed)
+        if: ${{ steps.cert.outputs.thumbprint != '' }}
+        run: >
+          pnpm --filter @lokalen/desktop tauri build --config
+          '{"bundle":{"windows":{"certificateThumbprint":"${{ steps.cert.outputs.thumbprint }}","digestAlgorithm":"sha256","timestampUrl":"http://timestamp.digicert.com"}}}'
+
+      - name: Build (unsigned)
+        if: ${{ steps.cert.outputs.thumbprint == '' }}
+        run: pnpm --filter @lokalen/desktop tauri build
 
       # The portable exe is the headline artifact: self-contained, with the
       # frontend and the relay compiled in. The installers are for people who

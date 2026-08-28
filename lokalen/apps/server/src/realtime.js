@@ -6,7 +6,7 @@ import {
   insertMessage, getMessage, recentHistory, markRead,
   officeInfo, insertTask, getTask, tasksFor, updateTask, deleteTask,
   broadcastRoom, setAvailability, setOperator, historyBefore,
-  editMessage, deleteMessage,
+  editMessage, deleteMessage, searchMessages,
 } from "./store.js";
 
 const HEARTBEAT_MS = 30_000;
@@ -139,6 +139,14 @@ export class Hub {
         ws.appPresence = event.status === "away" ? "away" : "online";
         return void this.broadcast({
           t: "presence", userId: ws.userId, presence: this.presenceOf(ws.userId), lastSeen: Date.now(),
+        });
+      }
+      case "search": {
+        const query = typeof event.query === "string" ? event.query.slice(0, 120) : "";
+        return this.send(ws, {
+          t: "searchResults",
+          query,
+          messages: searchMessages(this.db, ws.userId, query),
         });
       }
       case "messageEdit":   return this.#onMessageEdit(ws, event);

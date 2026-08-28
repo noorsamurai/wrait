@@ -39,6 +39,7 @@ interface RosterProps {
   onSelect: (id: UserId) => void;
   onOpenSettings: () => void;
   onOpenTasks: () => void;
+  onOpenSearch: () => void;
   openTaskCount: number;
   /** This room's own state, shown and changed in the footer. */
   availability: Availability;
@@ -49,7 +50,7 @@ interface RosterProps {
 
 export function Roster({
   self, users, threads, unread, typing, activePeer, connected, hidden, onSelect, onOpenSettings, onOpenTasks, openTaskCount,
-  availability, onAvailability, muted, onToggleMute,
+  availability, onAvailability, muted, onToggleMute, onOpenSearch,
 }: RosterProps) {
   const [query, setQuery] = useState("");
 
@@ -89,6 +90,14 @@ export function Roster({
           data-up={connected}
           title={connected ? "Ansluten" : "Återansluter…"}
         />
+        <button
+          className="btn btn--icon"
+          onClick={onOpenSearch}
+          aria-label="Sök i meddelanden"
+          title="Sök i meddelanden"
+        >
+          <SearchIcon size={17} />
+        </button>
         <button
           className="btn btn--icon"
           onClick={onOpenTasks}

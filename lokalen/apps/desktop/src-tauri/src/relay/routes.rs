@@ -25,6 +25,7 @@ const MAX_BODY_LENGTH: usize = 8000;
 const HISTORY_LIMIT: i64 = 500;
 const TASK_LIMIT: i64 = 500;
 const PAGE_LIMIT: i64 = 200;
+const SEARCH_LIMIT: i64 = 60;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -560,6 +561,16 @@ fn handle_event(state: &AppState, user_id: &str, socket_id: u64, event: ClientEv
                 user_id,
                 socket_id,
                 &ServerEvent::History { with_user, messages, exhausted },
+            );
+        }
+
+        ClientEvent::Search { query } => {
+            let query: String = query.chars().take(120).collect();
+            let messages = store::search_messages(&state.db, user_id, &query, SEARCH_LIMIT);
+            state.hub.send_to_socket(
+                user_id,
+                socket_id,
+                &ServerEvent::SearchResults { query, messages },
             );
         }
 

@@ -201,6 +201,8 @@ pub enum ClientEvent {
     MessageEdit { id: String, body: String },
     #[serde(rename = "messageDelete")]
     MessageDelete { id: String },
+    #[serde(rename = "search")]
+    Search { query: String },
     #[serde(rename = "ping")]
     Ping,
     #[serde(other)]
@@ -224,6 +226,8 @@ pub enum ServerEvent {
     Task { task: Task },
     #[serde(rename = "messageUpdated")]
     MessageUpdated { message: Message },
+    #[serde(rename = "searchResults")]
+    SearchResults { query: String, messages: Vec<Message> },
     #[serde(rename = "taskRemoved")]
     TaskRemoved { id: String },
     #[serde(rename = "message")]

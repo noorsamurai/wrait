@@ -1206,3 +1206,33 @@
   .photo-sheet { width: 100%; max-height: 100dvh; border-radius: 0; }
   .sheet-scrim:has(.photo-sheet) { padding: 0; }
 }
+
+/* Search shares the side panel with the task list; only one at a time. */
+.search-hit {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: background 0.12s var(--ease);
+}
+
+.search-hit:hover { background: var(--surface-2); }
+
+.search-hit__head {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.search-hit__room { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.search-hit__body {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12.5px;
+  margin-top: 2px;
+}

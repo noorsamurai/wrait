@@ -21,10 +21,11 @@ interface State {
   office: OfficeInfo | null;
   /** Conversations known to have no more history behind them. */
   exhausted: Record<UserId, boolean>;
+  search: { query: string; messages: Message[] } | null;
   ready: boolean;
 }
 
-const EMPTY: State = { self: null, users: [], threads: {}, unread: {}, typing: {}, tasks: [], office: null, exhausted: {}, ready: false };
+const EMPTY: State = { self: null, users: [], threads: {}, unread: {}, typing: {}, tasks: [], office: null, exhausted: {}, search: null, ready: false };
 
 type Action =
   | { type: "event"; event: ServerEvent; selfId: UserId | null; activePeer: UserId | null }
@@ -32,6 +33,7 @@ type Action =
   | { type: "failed"; clientId: string; peer: UserId }
   | { type: "clearUnread"; peer: UserId }
   | { type: "expireTyping"; peer: UserId }
+  | { type: "clearSearch" }
   | { type: "reset" };
 
 function peerOf(message: Message, selfId: UserId | null, broadcastId: UserId | null) {
@@ -62,6 +64,9 @@ function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "reset":
       return EMPTY;
+
+    case "clearSearch":
+      return { ...state, search: null };
 
     case "optimistic": {
       const peer = peerOf(action.message, state.self?.id ?? null, broadcastIdOf(state.users));
@@ -133,12 +138,16 @@ function applyEvent(state: State, { event, activePeer }: Extract<Action, { type:
         tasks: event.tasks ?? [],
         office: event.office ?? null,
         exhausted: {},
+        search: null,
         ready: true,
       };
     }
 
     case "roster":
       return { ...state, users: event.users };
+
+    case "searchResults":
+      return { ...state, search: { query: event.query, messages: event.messages } };
 
     case "messageUpdated": {
       const message = event.message;
@@ -389,6 +398,13 @@ export function useComms(session: Session | null, settings: Settings) {
 
   const nudge = useCallback((to: UserId) => realtime.current?.send({ t: "nudge", to }), []);
 
+  const search = useCallback(
+    (query: string) => realtime.current?.send({ t: "search", query }),
+    [],
+  );
+
+  const clearSearch = useCallback(() => dispatch({ type: "clearSearch" }), []);
+
   const editMessage = useCallback(
     (id: string, body: string) => realtime.current?.send({ t: "messageEdit", id, body }),
     [],
@@ -481,6 +497,8 @@ export function useComms(session: Session | null, settings: Settings) {
     openConversation,
     editMessage,
     deleteMessage,
+    search_: search,
+    clearSearch,
     setAvailability,
     setOperator,
     loadOlder,

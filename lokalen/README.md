@@ -117,6 +117,39 @@ pnpm --filter @lokalen/desktop tauri build
 `comms\apps\desktop\src-tauri\target\release\`, alongside an `.msi` and an
 NSIS installer for people who prefer a normal install.
 
+## Signing the Windows build
+
+Unsigned, the exe triggers SmartScreen's "Windows protected your PC" dialog,
+which is the single biggest obstacle to a colleague actually running it. CI
+signs the build automatically once two repository secrets exist:
+
+| Secret | What it is |
+|---|---|
+| `WINDOWS_CERT_BASE64` | Your `.pfx` code-signing certificate, base64-encoded |
+| `WINDOWS_CERT_PASSWORD` | The password for that `.pfx` |
+
+```bash
+base64 -w0 certificate.pfx        # paste the output as WINDOWS_CERT_BASE64
+```
+
+Without them the build still runs and publishes an unsigned exe, so nothing
+breaks while you are getting a certificate.
+
+**The certificate has to be bought** — from a CA such as DigiCert, Sectigo or
+SSL.com, as a company rather than an individual, for roughly €200–400 a year.
+Two kinds matter here:
+
+* **OV** is cheaper, but SmartScreen still warns until the signature has built
+  up reputation across enough installs — which for a three-machine clinic may
+  be never.
+* **EV** costs more and arrives on a hardware token, but is trusted
+  immediately. For an office this size, EV is the one that actually removes
+  the warning.
+
+A hardware-token EV certificate cannot be base64'd into a secret; those need a
+cloud signing service (Azure Trusted Signing, SSL.com eSigner) and a different
+CI step, which is worth wiring up once you have picked a provider.
+
 ## Uninstalling
 
 There is no uninstaller, because there is no install:
@@ -309,6 +342,26 @@ its bold, italics, lists and links, through a strict allowlist that rebuilds
 the markup from a parsed tree — no attributes at all except a scheme-checked
 `href`, and sanitised again at render, since the body arrived over the
 network. Right-click any message to copy it with or without formatting.
+
+**Search.** Every message a room can see, matched on its words rather than its
+markup: bodies carry pasted formatting, so a plain-text copy is kept alongside
+and folded for comparison in the relay rather than in SQL, since SQLite's
+`lower()` only handles ASCII and would leave Å, Ä and Ö unmatched. Several
+words narrow rather than widen.
+
+**Photos from a phone.** `accept="image/*"` with `multiple` is what makes iOS
+offer its own picker, so no plugin is involved. Picked photos go through an
+editor — rotation and a draggable crop per photo, then format, size and
+quality for the batch — and are re-encoded in a single draw rather than one
+canvas per step, which would compound the resampling.
+
+Metadata is the part that matters in a clinic. A phone photo carries GPS
+coordinates, the device and sometimes a street address, and none of that
+should travel with a picture of a patient. Re-encoding drops every tag; the
+only one that can come back is the timestamp, only when asked for, through an
+EXIF block written by hand rather than copied — so a tag nobody asked for has
+no path into the output. Size presets exist because eight iPhone photos is
+about 35 MB on clinic Wi-Fi, and about 3 MB at 1024 px.
 
 **Tasks.** Each person has a small list beside the conversation: a reminder,
 something to remember, something to do. A task can carry a date and is sorted
