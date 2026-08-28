@@ -74,3 +74,20 @@ export const DEFAULT_ROOMS = ["Behandlingsrum 1", "Behandlingsrum 2", "Reception
 
 /** The channel every room can see. */
 export const BROADCAST_ROOM = "Alla";
+
+/**
+ * How long after sending a message may still be deleted.
+ *
+ * Long enough to catch "wrong room" or a typo you cannot live with, short
+ * enough that the record of a clinic's day does not quietly change later.
+ */
+export const DELETE_WINDOW_MS = 5 * 60 * 1000;
+
+/** True while `message` is still inside its deletion window. */
+export function canDelete(message, selfId, now = Date.now()) {
+  return (
+    message.from === selfId &&
+    !message.deletedAt &&
+    now - message.sentAt < DELETE_WINDOW_MS
+  );
+}

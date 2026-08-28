@@ -83,8 +83,19 @@ export function openDatabase(file) {
       alert     INTEGER NOT NULL DEFAULT 0,
       file_id   TEXT REFERENCES files(id) ON DELETE SET NULL,
       sent_at   INTEGER NOT NULL,
-      read_at   INTEGER
+      read_at   INTEGER,
+      edited_at INTEGER,
+      deleted_at INTEGER
     );
+
+    -- Every earlier wording of an edited message, so the original stays
+    -- recallable by both the sender and the recipient.
+    CREATE TABLE IF NOT EXISTS message_revisions (
+      message_id  TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      body        TEXT NOT NULL,
+      replaced_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS revisions_message ON message_revisions(message_id, replaced_at);
     CREATE INDEX IF NOT EXISTS messages_pair ON messages(from_id, to_id, sent_at);
     CREATE INDEX IF NOT EXISTS messages_to   ON messages(to_id, sent_at);
   `);

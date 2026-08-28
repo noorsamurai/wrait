@@ -563,6 +563,56 @@ fn handle_event(state: &AppState, user_id: &str, socket_id: u64, event: ClientEv
             );
         }
 
+        ClientEvent::MessageEdit { id, body } => {
+            let Some(message) = store::get_message(&state.db, &id) else {
+                return error_to(state, user_id, socket_id, "forbidden", "Du kan bara ändra dina egna meddelanden.");
+            };
+            if message.from != user_id {
+                return error_to(state, user_id, socket_id, "forbidden", "Du kan bara ändra dina egna meddelanden.");
+            }
+            if message.deleted_at.is_some() {
+                return error_to(state, user_id, socket_id, "deleted", "Meddelandet är borttaget.");
+            }
+            let body: String = body.trim().chars().take(MAX_BODY_LENGTH).collect();
+            if body.is_empty() {
+                return error_to(state, user_id, socket_id, "empty", "Meddelandet kan inte vara tomt.");
+            }
+            if body == message.body {
+                return;
+            }
+            store::edit_message(&state.db, &id, &body);
+            if let Some(updated) = store::get_message(&state.db, &id) {
+                fan_out_message(state, &updated);
+            }
+        }
+
+        ClientEvent::MessageDelete { id } => {
+            let Some(message) = store::get_message(&state.db, &id) else {
+                return error_to(state, user_id, socket_id, "forbidden", "Du kan bara ta bort dina egna meddelanden.");
+            };
+            if message.from != user_id {
+                return error_to(state, user_id, socket_id, "forbidden", "Du kan bara ta bort dina egna meddelanden.");
+            }
+            if message.deleted_at.is_some() {
+                return;
+            }
+            // Enforced here, not just in the UI: a client with a slow clock or
+            // an old build must not be able to rewrite yesterday.
+            if now_ms() - message.sent_at >= DELETE_WINDOW_MS {
+                return error_to(
+                    state,
+                    user_id,
+                    socket_id,
+                    "too_late",
+                    "Det har gått mer än fem minuter, meddelandet kan inte tas bort.",
+                );
+            }
+            store::delete_message(&state.db, &id);
+            if let Some(updated) = store::get_message(&state.db, &id) {
+                fan_out_message(state, &updated);
+            }
+        }
+
         ClientEvent::TaskAdd {
             owner,
             title,
@@ -668,6 +718,21 @@ fn error_to(state: &AppState, user_id: &str, socket_id: u64, code: &str, message
             message: message.into(),
         },
     );
+}
+
+/// Both sides of a conversation see a changed message; a channel edit
+/// reaches every room.
+fn fan_out_message(state: &AppState, message: &Message) {
+    let channel = store::broadcast_room(&state.db).map(|r| r.id).unwrap_or_default();
+    if message.to == channel {
+        for room in state.hub.online_user_ids() {
+            state.hub.send_to(&room, &ServerEvent::MessageUpdated { message: message.clone() });
+        }
+        return;
+    }
+    for who in [message.from.as_str(), message.to.as_str()] {
+        state.hub.send_to(who, &ServerEvent::MessageUpdated { message: message.clone() });
+    }
 }
 
 /// Both sides of a task see it: whoever owns it and whoever sent it.

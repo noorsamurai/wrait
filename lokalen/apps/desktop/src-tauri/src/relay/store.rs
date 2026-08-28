@@ -13,7 +13,7 @@ use scrypt::{scrypt, Params};
 use sha2::{Digest, Sha256};
 
 use super::model::{
-    initials_of, now_ms, Attachment, Message, OfficeInfo, OfficeMode, Task, User,
+    initials_of, now_ms, Attachment, Message, OfficeInfo, OfficeMode, Revision, Task, User,
     BROADCAST_ROOM, DEFAULT_ROOMS,
 };
 
@@ -109,8 +109,19 @@ pub fn open(path: Option<&Path>) -> rusqlite::Result<Db> {
           alert     INTEGER NOT NULL DEFAULT 0,
           file_id   TEXT REFERENCES files(id) ON DELETE SET NULL,
           sent_at   INTEGER NOT NULL,
-          read_at   INTEGER
+          read_at   INTEGER,
+          edited_at INTEGER,
+          deleted_at INTEGER
         );
+
+        -- Every earlier wording of an edited message, so the original stays
+        -- recallable by both the sender and the recipient.
+        CREATE TABLE IF NOT EXISTS message_revisions (
+          message_id  TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+          body        TEXT NOT NULL,
+          replaced_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS revisions_message ON message_revisions(message_id, replaced_at);
         CREATE INDEX IF NOT EXISTS messages_pair ON messages(from_id, to_id, sent_at);
         CREATE INDEX IF NOT EXISTS messages_to   ON messages(to_id, sent_at);
         "#,
@@ -334,7 +345,8 @@ pub fn destroy_session(db: &Db, token: &str) {
 /* ------------------------------------------------------------------ */
 
 const MESSAGE_COLUMNS: &str = "m.id, m.client_id, m.from_id, m.to_id, m.body, m.alert, m.sent_at,
-     m.read_at, m.file_id, f.name AS file_name, f.size AS file_size, f.mime AS file_mime";
+     m.read_at, m.edited_at, m.deleted_at,
+     m.file_id, f.name AS file_name, f.size AS file_size, f.mime AS file_mime";
 
 fn message_from_row(row: &rusqlite::Row) -> rusqlite::Result<Message> {
     let file_id: Option<String> = row.get("file_id")?;
@@ -357,6 +369,11 @@ fn message_from_row(row: &rusqlite::Row) -> rusqlite::Result<Message> {
         alert: row.get::<_, i64>("alert")? == 1,
         sent_at: row.get("sent_at")?,
         read_at: row.get("read_at")?,
+        edited_at: row.get("edited_at")?,
+        deleted_at: row.get("deleted_at")?,
+        // Filled in by `get_message`; history keeps payloads small by leaving
+        // it empty until a message is actually opened.
+        revisions: Vec::new(),
     })
 }
 
@@ -382,7 +399,28 @@ pub fn insert_message(
     get_message(db, &id)
 }
 
+pub fn revisions_of(db: &Db, message_id: &str) -> Vec<Revision> {
+    let conn = db.lock().unwrap();
+    let mut stmt = match conn.prepare(
+        "SELECT body, replaced_at FROM message_revisions WHERE message_id = ? ORDER BY replaced_at",
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    stmt.query_map(params![message_id], |r| {
+        Ok(Revision { body: r.get(0)?, replaced_at: r.get(1)? })
+    })
+    .map(|rows| rows.filter_map(Result::ok).collect())
+    .unwrap_or_default()
+}
+
 pub fn get_message(db: &Db, id: &str) -> Option<Message> {
+    let mut message = get_message_row(db, id)?;
+    message.revisions = revisions_of(db, id);
+    Some(message)
+}
+
+fn get_message_row(db: &Db, id: &str) -> Option<Message> {
     let conn = db.lock().unwrap();
     conn.query_row(
         &format!(
@@ -728,5 +766,43 @@ pub fn set_operator(db: &Db, id: &str, name: Option<&str>) {
     let _ = conn.execute(
         "UPDATE users SET operator = ? WHERE id = ?",
         params![trimmed, id],
+    );
+}
+
+/* ------------------------------------------------------------------ */
+/* Editing and deleting                                                */
+/* ------------------------------------------------------------------ */
+
+/// Replaces the wording, keeping what was there before.
+pub fn edit_message(db: &Db, id: &str, body: &str) {
+    let conn = db.lock().unwrap();
+    let current: Option<String> = conn
+        .query_row("SELECT body FROM messages WHERE id = ?", params![id], |r| r.get(0))
+        .optional()
+        .ok()
+        .flatten();
+    let Some(current) = current else { return };
+    let at = now_ms();
+    let _ = conn.execute(
+        "INSERT INTO message_revisions (message_id, body, replaced_at) VALUES (?, ?, ?)",
+        params![id, current, at],
+    );
+    let _ = conn.execute(
+        "UPDATE messages SET body = ?, edited_at = ? WHERE id = ?",
+        params![body, at, id],
+    );
+}
+
+/// Leaves a tombstone rather than removing the row.
+///
+/// The recipient has already seen it; silently vacating the space would be
+/// more confusing than saying plainly that something was withdrawn. Earlier
+/// wordings go too, or deleting would be a way to publish them.
+pub fn delete_message(db: &Db, id: &str) {
+    let conn = db.lock().unwrap();
+    let _ = conn.execute("DELETE FROM message_revisions WHERE message_id = ?", params![id]);
+    let _ = conn.execute(
+        "UPDATE messages SET body = '', file_id = NULL, deleted_at = ? WHERE id = ?",
+        params![now_ms(), id],
     );
 }

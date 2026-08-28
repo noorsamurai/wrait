@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Message } from "@lokalen/protocol";
-import { formatBytes } from "@lokalen/protocol";
+import { formatBytes, canDelete } from "@lokalen/protocol";
 import { downloadUrl, type Session } from "../lib/client";
 import { saveAttachment } from "../lib/native";
-import { BellIcon, BookmarkIcon, DownloadIcon, FileIcon } from "./icons";
+import { BellIcon, BookmarkIcon, DownloadIcon, FileIcon, PencilIcon, TrashIcon } from "./icons";
 
 const time = new Intl.DateTimeFormat("sv-SE", { hour: "2-digit", minute: "2-digit" });
 
@@ -18,14 +18,50 @@ interface MessageBubbleProps {
   /** Saves this message into the reader's own task list. */
   onSaveToTasks: (message: Message) => void;
   saved: boolean;
+  onEdit: (id: string, body: string) => void;
+  onDelete: (id: string) => void;
+  /** Id of the room reading this, for deciding what may be changed. */
+  selfId: string;
 }
 
-export function MessageBubble({ message, mine, run, session, onSaveToTasks, saved }: MessageBubbleProps) {
+export function MessageBubble({
+  message, mine, run, session, onSaveToTasks, saved, onEdit, onDelete, selfId,
+}: MessageBubbleProps) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const pending = message.id.startsWith("pending:");
   const failed = message.id.startsWith("failed:");
+  const deleted = Boolean(message.deletedAt);
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message.body);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const editBox = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      setDraft(message.body);
+      editBox.current?.focus();
+    }
+  }, [editing, message.body]);
+
+  // The deletion window closes on a timer, so the button has to disappear on
+  // its own rather than only when something else re-renders.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (deleted || !mine) return;
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(timer);
+  }, [deleted, mine]);
+
+  const deletable = !pending && canDelete(message, selfId, now);
+
+  function commitEdit() {
+    const next = draft.trim();
+    setEditing(false);
+    if (next && next !== message.body) onEdit(message.id, next);
+  }
 
   /** Writes the attachment to disk - distinct from saving to the task list. */
   async function downloadAttachment() {
@@ -51,18 +87,52 @@ export function MessageBubble({ message, mine, run, session, onSaveToTasks, save
     .filter(Boolean)
     .join(" ");
 
+  if (deleted) {
+    return (
+      <div className="bubble-row" data-mine={mine}>
+        <div className="bubble bubble--tombstone" data-run={run}>
+          {mine ? "Du tog bort ett meddelande" : "Ett meddelande togs bort"}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bubble-row" data-mine={mine}>
       <div className={classes} data-run={run}>
-        <button
-          className="bubble__save"
-          data-saved={saved}
-          onClick={() => onSaveToTasks(message)}
-          title={saved ? "Redan sparad som uppgift" : "Spara som uppgift"}
-          aria-label={saved ? "Redan sparad som uppgift" : "Spara som uppgift"}
-        >
-          <BookmarkIcon size={14} />
-        </button>
+        <div className="bubble__actions">
+          {mine && !pending ? (
+            <>
+              <button
+                className="bubble__action"
+                onClick={() => setEditing(true)}
+                title="Ändra meddelandet"
+                aria-label="Ändra"
+              >
+                <PencilIcon size={13} />
+              </button>
+              {deletable ? (
+                <button
+                  className="bubble__action"
+                  onClick={() => onDelete(message.id)}
+                  title="Ta bort (går i fem minuter)"
+                  aria-label="Ta bort"
+                >
+                  <TrashIcon size={13} />
+                </button>
+              ) : null}
+            </>
+          ) : null}
+          <button
+            className="bubble__action bubble__save"
+            data-saved={saved}
+            onClick={() => onSaveToTasks(message)}
+            title={saved ? "Redan sparad som uppgift" : "Spara som uppgift"}
+            aria-label={saved ? "Redan sparad som uppgift" : "Spara som uppgift"}
+          >
+            <BookmarkIcon size={13} />
+          </button>
+        </div>
 
         {message.alert ? (
           <div className="bubble__alert-tag">
@@ -93,7 +163,49 @@ export function MessageBubble({ message, mine, run, session, onSaveToTasks, save
           </div>
         ) : null}
 
-        {message.body ? <div>{message.body}</div> : null}
+        {editing ? (
+          <div className="bubble__edit">
+            <textarea
+              ref={editBox}
+              className="composer__input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  commitEdit();
+                }
+                if (e.key === "Escape") setEditing(false);
+              }}
+              rows={2}
+              aria-label="Ändra meddelandet"
+            />
+            <div className="bubble__edit-row">
+              <button className="btn" onClick={() => setEditing(false)}>Avbryt</button>
+              <button className="btn btn--primary" onClick={commitEdit} disabled={!draft.trim()}>
+                Spara
+              </button>
+            </div>
+          </div>
+        ) : message.body ? (
+          <div>{message.body}</div>
+        ) : null}
+
+        {/* An edit is never silent: both sides can read what it used to say. */}
+        {message.revisions.length > 0 && !editing ? (
+          <div className="bubble__history">
+            <button className="bubble__edited" onClick={() => setShowOriginal((v) => !v)}>
+              {showOriginal ? "Dölj original" : "Ändrad · visa original"}
+            </button>
+            {showOriginal
+              ? message.revisions.map((revision) => (
+                  <div key={revision.replacedAt} className="bubble__revision">
+                    {revision.body}
+                  </div>
+                ))
+              : null}
+          </div>
+        ) : null}
 
         <div className="bubble__foot">
           {failed ? (

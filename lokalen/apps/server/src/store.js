@@ -26,7 +26,7 @@ export function toAttachment(row) {
   };
 }
 
-export function toMessage(row) {
+export function toMessage(row, revisions = []) {
   return {
     id: row.id,
     clientId: row.client_id ?? null,
@@ -37,11 +37,22 @@ export function toMessage(row) {
     alert: row.alert === 1,
     sentAt: row.sent_at,
     readAt: row.read_at ?? null,
+    editedAt: row.edited_at ?? null,
+    deletedAt: row.deleted_at ?? null,
+    revisions,
   };
+}
+
+export function revisionsOf(db, messageId) {
+  return db
+    .prepare("SELECT body, replaced_at FROM message_revisions WHERE message_id = ? ORDER BY replaced_at")
+    .all(messageId)
+    .map((r) => ({ body: r.body, replacedAt: r.replaced_at }));
 }
 
 const MESSAGE_COLUMNS = `
   m.id, m.client_id, m.from_id, m.to_id, m.body, m.alert, m.sent_at, m.read_at,
+  m.edited_at, m.deleted_at,
   m.file_id, f.name AS file_name, f.size AS file_size, f.mime AS file_mime
 `;
 
@@ -81,7 +92,7 @@ export function getMessage(db, id) {
   const row = db
     .prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages m LEFT JOIN files f ON f.id = m.file_id WHERE m.id = ?`)
     .get(id);
-  return row ? toMessage(row) : null;
+  return row ? toMessage(row, revisionsOf(db, id)) : null;
 }
 
 /**
@@ -294,4 +305,35 @@ export function setAvailability(db, id, availability) {
 export function setOperator(db, id, name) {
   const trimmed = typeof name === "string" ? name.trim().slice(0, 64) : "";
   db.prepare("UPDATE users SET operator = ? WHERE id = ?").run(trimmed || null, id);
+}
+
+/* ------------------------------------------------------------------ */
+/* Editing and deleting                                                */
+/* ------------------------------------------------------------------ */
+
+/** Replaces the wording, keeping what was there before. */
+export function editMessage(db, id, body) {
+  const current = db.prepare("SELECT body FROM messages WHERE id = ?").get(id);
+  if (!current) return;
+  const at = Date.now();
+  db.prepare("INSERT INTO message_revisions (message_id, body, replaced_at) VALUES (?, ?, ?)").run(
+    id,
+    current.body,
+    at
+  );
+  db.prepare("UPDATE messages SET body = ?, edited_at = ? WHERE id = ?").run(body, at, id);
+}
+
+/**
+ * Leaves a tombstone rather than removing the row.
+ *
+ * The recipient has already seen it; silently vacating the space would be
+ * more confusing than saying plainly that something was withdrawn. Earlier
+ * wordings go too, or deleting would be a way to publish them.
+ */
+export function deleteMessage(db, id) {
+  db.prepare("DELETE FROM message_revisions WHERE message_id = ?").run(id);
+  db.prepare(
+    "UPDATE messages SET body = '', file_id = NULL, deleted_at = ? WHERE id = ?"
+  ).run(Date.now(), id);
 }

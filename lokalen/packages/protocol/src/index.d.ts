@@ -42,6 +42,13 @@ export interface Attachment {
   mime: string;
 }
 
+/** One earlier wording of a message, kept so an edit can be looked back at. */
+export interface Revision {
+  body: string;
+  /** Epoch ms this wording was replaced. */
+  replacedAt: number;
+}
+
 export interface Message {
   id: string;
   /** Client-generated id, echoed back so the sender can reconcile its optimistic copy. */
@@ -54,7 +61,23 @@ export interface Message {
   alert: boolean;
   sentAt: number;
   readAt: number | null;
+  /** Epoch ms of the most recent edit, or null if never edited. */
+  editedAt: number | null;
+  /** Epoch ms it was deleted; the body is emptied when this is set. */
+  deletedAt: number | null;
+  /** Every earlier wording, oldest first. Visible to both sides. */
+  revisions: Revision[];
 }
+
+/** How long after sending a message may still be deleted. */
+export declare const DELETE_WINDOW_MS: number;
+
+/** True while `message` is still inside its deletion window. */
+export declare function canDelete(
+  message: Pick<Message, "from" | "sentAt" | "deletedAt">,
+  selfId: UserId,
+  now?: number,
+): boolean;
 
 /**
  * How an office lets people in.
@@ -152,6 +175,8 @@ export type ClientEvent =
   | { t: "taskEdit"; id: string; title?: string; notes?: string; dueAt?: number | null }
   | { t: "taskClear"; id: string; cleared: boolean }
   | { t: "taskDelete"; id: string }
+  | { t: "messageEdit"; id: string; body: string }
+  | { t: "messageDelete"; id: string }
   | { t: "typing"; to: UserId }
   | { t: "read"; withUser: UserId; upTo: number }
   | { t: "nudge"; to: UserId }
@@ -174,6 +199,8 @@ export type ServerEvent =
       office: OfficeInfo;
     }
   | { t: "task"; task: Task }
+  /** A message changed in place: edited, or deleted and left as a tombstone. */
+  | { t: "messageUpdated"; message: Message }
   | { t: "taskRemoved"; id: string }
   | { t: "message"; message: Message }
   | { t: "ack"; clientId: string; message: Message }

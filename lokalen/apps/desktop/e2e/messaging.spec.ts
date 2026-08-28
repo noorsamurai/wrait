@@ -8,13 +8,28 @@ const SERVER = "http://127.0.0.1:8788";
 
 /** Each run gets fresh usernames so the suite is re-runnable against one relay. */
 const stamp = Date.now().toString(36);
-const ANNA = { room: "Behandlingsrum 1", operator: "Anna" };
-const BJORN = { room: "Reception", operator: "Björn" };
+const ANNA = { room: `Rum A ${stamp}`, operator: "Anna" };
+const BJORN = { room: `Rum B ${stamp}`, operator: "Björn" };
 
 /**
  * A machine signs in as the room it stands in, optionally naming who is at
  * it. There is no password anywhere in an open office.
  */
+
+/**
+ * Creates a room up front so this spec owns its own conversation.
+ *
+ * Every spec in a run shares one relay; without this they would all talk in
+ * Behandlingsrum 1 and trip over each other's history.
+ */
+async function ensureRoom(name: string) {
+  await fetch(`${SERVER}/api/join`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ displayName: name }),
+  });
+}
+
 async function joinOffice(page: Page, who: { room: string; operator: string }) {
   await page.goto("/");
   await page.getByLabel("Kontorets server").fill(SERVER);
@@ -31,6 +46,8 @@ test("två rum chattar, larmar och byter fil", async ({ browser }) => {
   const a = await alice.newPage();
   const b = await bob.newPage();
 
+  await ensureRoom(ANNA.room);
+  await ensureRoom(BJORN.room);
   await joinOffice(a, ANNA);
   await joinOffice(b, BJORN);
 
@@ -39,9 +56,10 @@ test("två rum chattar, larmar och byter fil", async ({ browser }) => {
   await expect(a.getByRole("option", { name: new RegExp(BJORN.room) })).toBeVisible();
 
   await a.getByRole("option", { name: new RegExp(BJORN.room) }).click();
-  await expect(
-    a.locator(".chat__empty").getByText(BJORN.room, { exact: false }),
-  ).toBeVisible();
+  // Not an empty-state assertion: every spec in a run shares one relay, so
+  // this pair may already carry history from an earlier test.
+  await expect(a.locator(".chat__head-name")).toContainText(BJORN.room);
+  await expect(a.getByLabel(`Meddelande till ${BJORN.room}`)).toBeVisible();
 
   await test.step("ett vanligt meddelande kommer fram", async () => {
     await a.getByLabel(/^Meddelande till /).fill("Avstämning om fem?");

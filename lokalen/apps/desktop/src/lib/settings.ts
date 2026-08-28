@@ -125,3 +125,33 @@ export function rememberOperator(name: string) {
     /* ignore */
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Drafts                                                              */
+/* ------------------------------------------------------------------ */
+
+const DRAFT_PREFIX = "lokalen.draft.";
+
+/**
+ * Unsent text, kept per conversation.
+ *
+ * Losing a half-typed message because you glanced at another room is a small
+ * thing that feels like a broken app, so drafts survive both switching and
+ * restarting.
+ */
+export function loadDraft(peer: string): string {
+  try {
+    return localStorage.getItem(DRAFT_PREFIX + peer) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function saveDraft(peer: string, text: string) {
+  try {
+    if (text) localStorage.setItem(DRAFT_PREFIX + peer, text);
+    else localStorage.removeItem(DRAFT_PREFIX + peer);
+  } catch {
+    /* A draft is a convenience; failing to keep it must not break sending. */
+  }
+}

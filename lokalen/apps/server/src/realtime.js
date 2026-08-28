@@ -1,11 +1,12 @@
 import { WebSocketServer } from "ws";
-import { PROTOCOL_VERSION } from "@lokalen/protocol";
+import { PROTOCOL_VERSION, DELETE_WINDOW_MS } from "@lokalen/protocol";
 import { resolveSession, newId } from "./auth.js";
 import {
   toUser, listUsers, findUserById, touchUser,
   insertMessage, getMessage, recentHistory, markRead,
   officeInfo, insertTask, getTask, tasksFor, updateTask, deleteTask,
   broadcastRoom, setAvailability, setOperator, historyBefore,
+  editMessage, deleteMessage,
 } from "./store.js";
 
 const HEARTBEAT_MS = 30_000;
@@ -140,6 +141,8 @@ export class Hub {
           t: "presence", userId: ws.userId, presence: this.presenceOf(ws.userId), lastSeen: Date.now(),
         });
       }
+      case "messageEdit":   return this.#onMessageEdit(ws, event);
+      case "messageDelete": return this.#onMessageDelete(ws, event);
       case "taskAdd":    return this.#onTaskAdd(ws, event);
       case "taskEdit":   return this.#onTaskEdit(ws, event);
       case "taskClear":  return this.#onTaskClear(ws, event);
@@ -205,6 +208,56 @@ export class Hub {
     const audience = new Set([task.owner, task.createdBy]);
     if (extra) audience.add(extra);
     for (const userId of audience) this.sendTo(userId, { t: "task", task });
+  }
+
+  /** Both sides of a conversation, and the sender's other devices. */
+  #fanOutMessage(message) {
+    const channel = broadcastRoom(this.db);
+    if (channel && message.to === channel.id) {
+      for (const userId of this.sockets.keys()) this.sendTo(userId, { t: "messageUpdated", message });
+      return;
+    }
+    for (const userId of new Set([message.from, message.to])) {
+      this.sendTo(userId, { t: "messageUpdated", message });
+    }
+  }
+
+  #onMessageEdit(ws, event) {
+    const message = getMessage(this.db, event.id);
+    if (!message || message.from !== ws.userId) {
+      return this.send(ws, { t: "error", code: "forbidden", message: "Du kan bara ändra dina egna meddelanden." });
+    }
+    if (message.deletedAt) {
+      return this.send(ws, { t: "error", code: "deleted", message: "Meddelandet är borttaget." });
+    }
+    const body = typeof event.body === "string" ? event.body.trim().slice(0, MAX_BODY_LENGTH) : "";
+    if (!body) {
+      return this.send(ws, { t: "error", code: "empty", message: "Meddelandet kan inte vara tomt." });
+    }
+    if (body === message.body) return;
+
+    editMessage(this.db, event.id, body);
+    this.#fanOutMessage(getMessage(this.db, event.id));
+  }
+
+  #onMessageDelete(ws, event) {
+    const message = getMessage(this.db, event.id);
+    if (!message || message.from !== ws.userId) {
+      return this.send(ws, { t: "error", code: "forbidden", message: "Du kan bara ta bort dina egna meddelanden." });
+    }
+    if (message.deletedAt) return;
+    // The window is enforced here, not just in the UI: a client with a slow
+    // clock or an old build must not be able to rewrite yesterday.
+    if (Date.now() - message.sentAt >= DELETE_WINDOW_MS) {
+      return this.send(ws, {
+        t: "error",
+        code: "too_late",
+        message: "Det har gått mer än fem minuter, meddelandet kan inte tas bort.",
+      });
+    }
+
+    deleteMessage(this.db, event.id);
+    this.#fanOutMessage(getMessage(this.db, event.id));
   }
 
   #onTaskAdd(ws, event) {

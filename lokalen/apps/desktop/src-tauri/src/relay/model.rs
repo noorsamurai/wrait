@@ -11,6 +11,11 @@ pub const CHUNK_SIZE: u64 = 512 * 1024;
 pub const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// How long after sending a message may still be deleted. Long enough to
+/// catch "wrong room", short enough that the day's record does not quietly
+/// change later.
+pub const DELETE_WINDOW_MS: i64 = 5 * 60 * 1000;
+
 /// The rooms a new office starts with. A room is a place, not a person.
 pub const DEFAULT_ROOMS: [&str; 3] = ["Behandlingsrum 1", "Behandlingsrum 2", "Reception"];
 
@@ -47,6 +52,14 @@ pub struct Attachment {
     pub mime: String,
 }
 
+/// One earlier wording of a message, kept so an edit can be looked back at.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Revision {
+    pub body: String,
+    pub replaced_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
@@ -59,6 +72,10 @@ pub struct Message {
     pub alert: bool,
     pub sent_at: i64,
     pub read_at: Option<i64>,
+    pub edited_at: Option<i64>,
+    pub deleted_at: Option<i64>,
+    /// Every earlier wording, oldest first. Visible to both sides.
+    pub revisions: Vec<Revision>,
 }
 
 /// How an office lets people in.
@@ -180,6 +197,10 @@ pub enum ClientEvent {
     TaskClear { id: String, cleared: bool },
     #[serde(rename = "taskDelete")]
     TaskDelete { id: String },
+    #[serde(rename = "messageEdit")]
+    MessageEdit { id: String, body: String },
+    #[serde(rename = "messageDelete")]
+    MessageDelete { id: String },
     #[serde(rename = "ping")]
     Ping,
     #[serde(other)]
@@ -201,6 +222,8 @@ pub enum ServerEvent {
     },
     #[serde(rename = "task")]
     Task { task: Task },
+    #[serde(rename = "messageUpdated")]
+    MessageUpdated { message: Message },
     #[serde(rename = "taskRemoved")]
     TaskRemoved { id: String },
     #[serde(rename = "message")]

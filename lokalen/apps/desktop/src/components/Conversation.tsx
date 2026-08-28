@@ -44,11 +44,16 @@ interface ConversationProps {
   onSaveMessage: (message: Message) => void;
   /** Ids of messages already saved into the task list. */
   savedMessageIds: Set<string>;
+  onEditMessage: (id: string, body: string) => void;
+  onDeleteMessage: (id: string) => void;
+  /** Asks for the page of messages before the oldest one shown. */
+  onLoadOlder: () => void;
+  exhausted: boolean;
 }
 
 export function Conversation({
   session, self, peer, messages, typing, onSend, onTyping, onNudge, onBack,
-  onSaveMessage, savedMessageIds,
+  onSaveMessage, savedMessageIds, onEditMessage, onDeleteMessage, onLoadOlder, exhausted,
 }: ConversationProps) {
   const log = useRef<HTMLDivElement>(null);
   const [dropping, setDropping] = useState(false);
@@ -58,9 +63,19 @@ export function Conversation({
   // Stick to the bottom, but only when the reader is already there - jumping
   // someone away from older messages they are reading is maddening.
   const pinned = useRef(true);
+  const loadingOlder = useRef(false);
+  const anchor = useRef<number | null>(null);
   useLayoutEffect(() => {
     const node = log.current;
     if (!node) return;
+    if (anchor.current !== null) {
+      // Older messages were prepended: restore the reader's position relative
+      // to the bottom, so the view does not lurch.
+      node.scrollTop = node.scrollHeight - anchor.current;
+      anchor.current = null;
+      loadingOlder.current = false;
+      return;
+    }
     if (pinned.current) node.scrollTop = node.scrollHeight;
   }, [messages, typing]);
 
@@ -74,6 +89,14 @@ export function Conversation({
     const node = log.current;
     if (!node) return;
     pinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 60;
+
+    // Near the top: pull in the page behind what is shown. Anchoring keeps the
+    // reader where they were instead of jumping them to the new top.
+    if (node.scrollTop < 120 && !exhausted && !loadingOlder.current) {
+      loadingOlder.current = true;
+      anchor.current = node.scrollHeight - node.scrollTop;
+      onLoadOlder();
+    }
   }
 
   function nudge() {
@@ -139,6 +162,9 @@ export function Conversation({
       </header>
 
       <div className="chat__log" ref={log} onScroll={onScroll}>
+        {messages.length > 0 && !exhausted ? (
+          <button className="chat__older" onClick={onLoadOlder}>Visa äldre meddelanden</button>
+        ) : null}
         {messages.length === 0 ? (
           <p className="chat__empty">
             {peer.kind === "broadcast"
@@ -161,6 +187,9 @@ export function Conversation({
                   session={session}
                   onSaveToTasks={onSaveMessage}
                   saved={savedMessageIds.has(message.id)}
+                  onEdit={onEditMessage}
+                  onDelete={onDeleteMessage}
+                  selfId={self.id}
                 />
               </div>
             );

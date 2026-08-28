@@ -1,8 +1,24 @@
 import { test, expect, type Page } from "@playwright/test";
 
 const SERVER = "http://127.0.0.1:8788";
-const ANNA = "Behandlingsrum 2";
-const BJORN = "Reception";
+const stamp = Date.now().toString(36);
+const ANNA = `Rum E ${stamp}`;
+const BJORN = `Rum F ${stamp}`;
+
+
+/**
+ * Creates a room up front so this spec owns its own conversation.
+ *
+ * Every spec in a run shares one relay; without this they would all talk in
+ * Behandlingsrum 1 and trip over each other's history.
+ */
+async function ensureRoom(name: string) {
+  await fetch(`${SERVER}/api/join`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ displayName: name }),
+  });
+}
 
 async function joinOffice(page: Page, room: string) {
   await page.goto("/");
@@ -20,6 +36,8 @@ test("uppgifter: egna, skickade, klarmarkerade och sparade meddelanden", async (
   const a = await annaCtx.newPage();
   const b = await bjornCtx.newPage();
 
+  await ensureRoom(ANNA);
+  await ensureRoom(BJORN);
   await joinOffice(a, ANNA);
   await joinOffice(b, BJORN);
   await a.reload();

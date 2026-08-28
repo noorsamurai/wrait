@@ -131,6 +131,10 @@ export function App() {
             onBack={() => comms.openConversation(null)}
             onSaveMessage={saveMessage}
             savedMessageIds={savedMessageIds}
+            onEditMessage={comms.editMessage}
+            onDeleteMessage={comms.deleteMessage}
+            onLoadOlder={() => comms.loadOlder(comms.active!.id)}
+            exhausted={Boolean(comms.exhausted[comms.active!.id])}
           />
         ) : (
           <section className="surface chat chat--placeholder">

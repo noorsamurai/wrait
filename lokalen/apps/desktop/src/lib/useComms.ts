@@ -139,6 +139,20 @@ function applyEvent(state: State, { event, activePeer }: Extract<Action, { type:
     case "roster":
       return { ...state, users: event.users };
 
+    case "messageUpdated": {
+      const message = event.message;
+      const peer = peerOf(message, state.self?.id ?? null, broadcastIdOf(state.users));
+      const list = state.threads[peer];
+      if (!list) return state;
+      return {
+        ...state,
+        threads: {
+          ...state.threads,
+          [peer]: list.map((m) => (m.id === message.id ? message : m)),
+        },
+      };
+    }
+
     case "task": {
       const index = state.tasks.findIndex((t) => t.id === event.task.id);
       if (index < 0) return { ...state, tasks: [...state.tasks, event.task] };
@@ -351,6 +365,9 @@ export function useComms(session: Session | null, settings: Settings) {
           alert: Boolean(options.alert),
           sentAt: Date.now(),
           readAt: null,
+          editedAt: null,
+          deletedAt: null,
+          revisions: [],
         },
       });
 
@@ -368,6 +385,16 @@ export function useComms(session: Session | null, settings: Settings) {
   );
 
   const nudge = useCallback((to: UserId) => realtime.current?.send({ t: "nudge", to }), []);
+
+  const editMessage = useCallback(
+    (id: string, body: string) => realtime.current?.send({ t: "messageEdit", id, body }),
+    [],
+  );
+
+  const deleteMessage = useCallback(
+    (id: string) => realtime.current?.send({ t: "messageDelete", id }),
+    [],
+  );
 
   const setAvailability = useCallback(
     (availability: Availability) => realtime.current?.send({ t: "availability", availability }),
@@ -449,6 +476,8 @@ export function useComms(session: Session | null, settings: Settings) {
     nudge,
     setTyping,
     openConversation,
+    editMessage,
+    deleteMessage,
     setAvailability,
     setOperator,
     loadOlder,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Attachment, UserId } from "@lokalen/protocol";
 import { formatBytes, MAX_FILE_BYTES } from "@lokalen/protocol";
 import { uploadFile, type Session } from "../lib/client";
+import { loadDraft, saveDraft } from "../lib/settings";
 import { BellIcon, PaperclipIcon, SendIcon } from "./icons";
 
 interface ComposerProps {
@@ -18,7 +19,7 @@ interface ComposerProps {
 export function Composer({
   session, peer, peerName, onSend, onTyping, droppedFile, onDroppedFileHandled,
 }: ComposerProps) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => loadDraft(peer));
   const [alert, setAlert] = useState(false);
   const [upload, setUpload] = useState<{ name: string; sent: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,12 +27,17 @@ export function Composer({
   const textarea = useRef<HTMLTextAreaElement>(null);
   const lastTyping = useRef(0);
 
-  // Reset per-conversation state when the user switches person.
+  // Switching conversation swaps in that conversation's own draft rather than
+  // discarding what was typed.
   useEffect(() => {
-    setText("");
+    setText(loadDraft(peer));
     setAlert(false);
     setError(null);
   }, [peer]);
+
+  useEffect(() => {
+    saveDraft(peer, text);
+  }, [peer, text]);
 
   // Grow the textarea with its content, up to the CSS max-height.
   useEffect(() => {
@@ -55,6 +61,7 @@ export function Composer({
       // Send the caption typed while the upload was running, if any.
       onSend(text.trim(), { alert, attachment });
       setText("");
+      saveDraft(peer, "");
       setAlert(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Överföringen misslyckades.");
@@ -78,6 +85,7 @@ export function Composer({
     if (!body || upload) return;
     onSend(body, { alert });
     setText("");
+    saveDraft(peer, "");
     setAlert(false);
   }
 
