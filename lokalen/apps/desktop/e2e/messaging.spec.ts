@@ -97,7 +97,7 @@ test("två rum chattar, larmar och byter fil", async ({ browser }) => {
     const payload = randomBytes(700 * 1024);
     await writeFile(path, payload);
 
-    await a.locator('input[type="file"]').setInputFiles(path);
+    await a.locator('input[type="file"]:not([accept])').setInputFiles(path);
 
     const card = b.locator(".attachment").last();
     await expect(card).toContainText("quarterly-report.bin", { timeout: 20_000 });

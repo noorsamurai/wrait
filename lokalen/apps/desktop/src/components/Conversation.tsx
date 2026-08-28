@@ -4,7 +4,7 @@ import type { Session } from "../lib/client";
 import { Avatar } from "./Avatar";
 import { Composer } from "./Composer";
 import { MessageBubble, type RunPosition } from "./MessageBubble";
-import { BackIcon, BellIcon } from "./icons";
+import { ArrowRightIcon, BackIcon, BellIcon } from "./icons";
 
 const dayLabel = new Intl.DateTimeFormat("sv-SE", { weekday: "long", day: "numeric", month: "long" });
 
@@ -40,6 +40,8 @@ interface ConversationProps {
   onSend: (body: string, options: { alert?: boolean; attachment?: Attachment }) => void;
   onTyping: () => void;
   onNudge: () => void;
+  /** Sends "please come to this room", naming this room, in one tap. */
+  onComeHere: () => void;
   onBack: () => void;
   onSaveMessage: (message: Message) => void;
   /** Ids of messages already saved into the task list. */
@@ -53,12 +55,13 @@ interface ConversationProps {
 
 export function Conversation({
   session, self, peer, messages, typing, onSend, onTyping, onNudge, onBack,
-  onSaveMessage, savedMessageIds, onEditMessage, onDeleteMessage, onLoadOlder, exhausted,
+  onSaveMessage, savedMessageIds, onEditMessage, onDeleteMessage, onLoadOlder, exhausted, onComeHere,
 }: ConversationProps) {
   const log = useRef<HTMLDivElement>(null);
   const [dropping, setDropping] = useState(false);
   const [droppedFile, setDroppedFile] = useState<File | null>(null);
   const [nudgeSent, setNudgeSent] = useState(false);
+  const [called, setCalled] = useState(false);
 
   // Stick to the bottom, but only when the reader is already there - jumping
   // someone away from older messages they are reading is maddening.
@@ -148,6 +151,18 @@ export function Conversation({
                     : "Online"}
           </div>
         </div>
+        {peer.kind === "broadcast" ? null : (
+        <button
+          className="btn"
+          onClick={() => { onComeHere(); setCalled(true); setTimeout(() => setCalled(false), 2500); }}
+          disabled={called}
+          title={`Ber ${peer.displayName} komma till ${self.displayName}`}
+        >
+          <ArrowRightIcon size={15} />
+          {called ? "Bad dem" : "Kom hit"}
+        </button>
+        )}
+
         {peer.kind === "broadcast" ? null : (
         <button
           className="btn"

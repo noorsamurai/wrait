@@ -176,7 +176,29 @@ export function MessageBubble({
           </div>
         ) : null}
 
-        {message.attachment ? (
+        {message.attachment && message.attachment.mime.startsWith("image/") ? (
+          <figure className="photo">
+            <img
+              src={downloadUrl(session, message.attachment.fileId)}
+              alt={message.attachment.name}
+              loading="lazy"
+              onClick={downloadAttachment}
+            />
+            <figcaption>
+              <span>{message.attachment.name} · {formatBytes(message.attachment.size)}</span>
+              <button
+                className="bubble__action"
+                onClick={downloadAttachment}
+                disabled={saving || pending}
+                aria-label={`Spara ${message.attachment.name}`}
+                title="Spara på den här datorn"
+              >
+                <DownloadIcon size={14} />
+              </button>
+            </figcaption>
+            {saveError ? <figcaption className="photo__error">{saveError}</figcaption> : null}
+          </figure>
+        ) : message.attachment ? (
           <div className="attachment">
             <span className="attachment__icon">
               <FileIcon size={16} />

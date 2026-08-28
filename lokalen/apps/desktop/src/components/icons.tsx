@@ -3,6 +3,8 @@
 
 interface IconProps {
   size?: number;
+  /** Mirrors the glyph, for a left/right pair drawn from one path. */
+  flip?: boolean;
 }
 
 const base = (size: number) => ({
@@ -162,5 +164,27 @@ export const PencilIcon = ({ size = 18 }: IconProps) => (
   <svg {...base(size)}>
     <path d="M12 20h9" />
     <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+  </svg>
+);
+
+export const ArrowRightIcon = ({ size = 18 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M5 12h14" />
+    <path d="m13 5 7 7-7 7" />
+  </svg>
+);
+
+export const RotateIcon = ({ size = 18, flip }: IconProps) => (
+  <svg {...base(size)} style={flip ? { transform: "scaleX(-1)" } : undefined}>
+    <path d="M3 12a9 9 0 1 0 3-6.7" />
+    <path d="M3 4v5h5" />
+  </svg>
+);
+
+export const ImageIcon = ({ size = 18 }: IconProps) => (
+  <svg {...base(size)}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <circle cx="8.8" cy="8.8" r="1.6" />
+    <path d="m21 15-4.5-4.5L6 21" />
   </svg>
 );

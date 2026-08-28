@@ -4,7 +4,8 @@ import { formatBytes, MAX_FILE_BYTES } from "@lokalen/protocol";
 import { uploadFile, type Session } from "../lib/client";
 import { loadDraft, saveDraft } from "../lib/settings";
 import { sanitizeHtml } from "../lib/richtext";
-import { BellIcon, PaperclipIcon, SendIcon } from "./icons";
+import { BellIcon, ImageIcon, PaperclipIcon, SendIcon } from "./icons";
+import { PhotoComposer } from "./PhotoComposer";
 
 interface ComposerProps {
   session: Session;
@@ -27,6 +28,8 @@ export function Composer({
   const [upload, setUpload] = useState<{ name: string; sent: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const [photos, setPhotos] = useState<File[] | null>(null);
   const editor = useRef<HTMLDivElement>(null);
   const lastTyping = useRef(0);
 
@@ -75,6 +78,19 @@ export function Composer({
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/\n/g, "<br>");
+  }
+
+  /**
+   * Sends the edited photos one after another.
+   *
+   * Sequential rather than parallel: several phone photos at once would have
+   * every chunked upload competing for the same office Wi-Fi.
+   */
+  async function sendPhotos(edited: { blob: Blob; name: string }[]) {
+    setPhotos(null);
+    for (const item of edited) {
+      await transfer(new File([item.blob], item.name, { type: item.blob.type }));
+    }
   }
 
   async function transfer(file: File) {
@@ -142,6 +158,15 @@ export function Composer({
 
   return (
     <div className="composer">
+      {photos ? (
+        <PhotoComposer
+          files={photos}
+          peerName={peerName}
+          onCancel={() => setPhotos(null)}
+          onSend={sendPhotos}
+        />
+      ) : null}
+
       {upload ? (
         <div className="transfer">
           <span style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -160,6 +185,31 @@ export function Composer({
       {error ? <div className="notice" style={{ marginBottom: 9 }}>{error}</div> : null}
 
       <div className="composer__row">
+        {/* accept="image/*" is what makes iOS offer its own photo sheet -
+            Fotobibliotek, Ta foto, Bläddra - with real multi-select. */}
+        <button
+          className="btn btn--icon"
+          onClick={() => photoInput.current?.click()}
+          disabled={Boolean(upload)}
+          aria-label="Skicka bilder"
+          title="Skicka bilder"
+        >
+          <ImageIcon />
+        </button>
+
+        <input
+          ref={photoInput}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            const picked = Array.from(e.target.files ?? []);
+            if (picked.length) setPhotos(picked);
+            e.target.value = "";
+          }}
+        />
+
         <button
           className="btn btn--icon"
           onClick={() => fileInput.current?.click()}

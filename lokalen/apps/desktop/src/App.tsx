@@ -129,6 +129,9 @@ export function App() {
             onSend={(body, options) => comms.send(comms.active!.id, body, options)}
             onTyping={() => comms.setTyping(comms.active!.id)}
             onNudge={() => comms.nudge(comms.active!.id)}
+            onComeHere={() =>
+              comms.send(comms.active!.id, `Kan du komma till ${self.displayName}?`, { alert: true })
+            }
             onBack={() => comms.openConversation(null)}
             onSaveMessage={saveMessage}
             savedMessageIds={savedMessageIds}
