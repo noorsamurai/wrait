@@ -88,14 +88,14 @@ test("ändra, ta bort, original och utkast", async ({ browser }) => {
   await test.step("utkast överlever byte av rum och omstart", async () => {
     await a.getByLabel(/^Meddelande till /).fill("Halvfärdigt till receptionen");
     await a.locator(".roster").getByRole("option").filter({ hasText: "Alla" }).click();
-    await expect(a.getByLabel(/^Meddelande till /)).toHaveValue("");
+    await expect(a.getByLabel(/^Meddelande till /)).toHaveText("");
 
     await a.locator(".roster").getByRole("option").filter({ hasText: ROOM_B }).click();
-    await expect(a.getByLabel(/^Meddelande till /)).toHaveValue("Halvfärdigt till receptionen");
+    await expect(a.getByLabel(/^Meddelande till /)).toHaveText("Halvfärdigt till receptionen");
 
     await a.reload();
     await a.locator(".roster").getByRole("option").filter({ hasText: ROOM_B }).click();
-    await expect(a.getByLabel(/^Meddelande till /)).toHaveValue("Halvfärdigt till receptionen");
+    await expect(a.getByLabel(/^Meddelande till /)).toHaveText("Halvfärdigt till receptionen");
   });
 
   await aCtx.close();

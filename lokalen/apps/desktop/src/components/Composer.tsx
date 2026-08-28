@@ -3,6 +3,7 @@ import type { Attachment, UserId } from "@lokalen/protocol";
 import { formatBytes, MAX_FILE_BYTES } from "@lokalen/protocol";
 import { uploadFile, type Session } from "../lib/client";
 import { loadDraft, saveDraft } from "../lib/settings";
+import { sanitizeHtml } from "../lib/richtext";
 import { BellIcon, PaperclipIcon, SendIcon } from "./icons";
 
 interface ComposerProps {
@@ -19,18 +20,22 @@ interface ComposerProps {
 export function Composer({
   session, peer, peerName, onSend, onTyping, droppedFile, onDroppedFileHandled,
 }: ComposerProps) {
+  // The editor's DOM is the source of truth while typing; writing state back
+      // into it on every keystroke would move the caret to the end.
   const [text, setText] = useState(() => loadDraft(peer));
   const [alert, setAlert] = useState(false);
   const [upload, setUpload] = useState<{ name: string; sent: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const textarea = useRef<HTMLTextAreaElement>(null);
+  const editor = useRef<HTMLDivElement>(null);
   const lastTyping = useRef(0);
 
   // Switching conversation swaps in that conversation's own draft rather than
   // discarding what was typed.
   useEffect(() => {
-    setText(loadDraft(peer));
+    const draft = loadDraft(peer);
+    setText(draft);
+    if (editor.current) editor.current.innerHTML = draft;
     setAlert(false);
     setError(null);
   }, [peer]);
@@ -39,13 +44,38 @@ export function Composer({
     saveDraft(peer, text);
   }, [peer, text]);
 
-  // Grow the textarea with its content, up to the CSS max-height.
-  useEffect(() => {
-    const node = textarea.current;
-    if (!node) return;
-    node.style.height = "auto";
-    node.style.height = `${Math.min(node.scrollHeight, 140)}px`;
-  }, [text]);
+  function clearEditor() {
+    setText("");
+    saveDraft(peer, "");
+    if (editor.current) editor.current.innerHTML = "";
+  }
+
+  /**
+   * Keeps what was pasted rather than flattening it.
+   *
+   * The clipboard's HTML goes through the sanitiser first, so formatting
+   * survives but anything that came along with it does not.
+   */
+  function onPaste(event: React.ClipboardEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const html = event.clipboardData.getData("text/html");
+    const plain = event.clipboardData.getData("text/plain");
+    const fragment = html ? sanitizeHtml(html) : escapePlain(plain);
+    if (!fragment) return;
+
+    // execCommand is deprecated but is still the only thing that inserts at
+    // the caret and leaves the browser's own undo stack intact.
+    document.execCommand("insertHTML", false, fragment);
+    if (editor.current) setText(editor.current.innerHTML);
+  }
+
+  function escapePlain(value: string) {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br>");
+  }
 
   async function transfer(file: File) {
     if (file.size > MAX_FILE_BYTES) {
@@ -59,9 +89,8 @@ export function Composer({
         setUpload({ name: file.name, sent, total }),
       );
       // Send the caption typed while the upload was running, if any.
-      onSend(text.trim(), { alert, attachment });
-      setText("");
-      saveDraft(peer, "");
+      onSend(sanitizeHtml(text), { alert, attachment });
+      clearEditor();
       setAlert(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Överföringen misslyckades.");
@@ -81,15 +110,19 @@ export function Composer({
   }, [droppedFile]);
 
   function submit() {
-    const body = text.trim();
-    if (!body || upload) return;
+    const body = sanitizeHtml(text);
+    if (!plainLength(body) || upload) return;
     onSend(body, { alert });
-    setText("");
-    saveDraft(peer, "");
+    clearEditor();
     setAlert(false);
   }
 
-  function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+  /** Length of the visible text, so markup alone never counts as a message. */
+  function plainLength(html: string) {
+    return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length;
+  }
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     // Enter sends; Shift+Enter is a newline. Familiar from every chat app.
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -97,8 +130,8 @@ export function Composer({
     }
   }
 
-  function onChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
-    setText(event.target.value);
+  function onInput() {
+    setText(editor.current?.innerHTML ?? "");
     // Throttle: one typing ping per two seconds is plenty.
     const now = Date.now();
     if (now - lastTyping.current > 2000) {
@@ -149,14 +182,17 @@ export function Composer({
           }}
         />
 
-        <textarea
-          ref={textarea}
+        <div
+          ref={editor}
           className="composer__input"
-          placeholder={`Meddelande till ${peerName}`}
-          value={text}
-          onChange={onChange}
+          contentEditable
+          suppressContentEditableWarning
+          role="textbox"
+          aria-multiline="true"
+          data-placeholder={`Meddelande till ${peerName}`}
+          onInput={onInput}
+          onPaste={onPaste}
           onKeyDown={onKeyDown}
-          rows={1}
           aria-label={`Meddelande till ${peerName}`}
         />
 
@@ -173,7 +209,7 @@ export function Composer({
         <button
           className="btn btn--primary btn--icon"
           onClick={submit}
-          disabled={!text.trim() || Boolean(upload)}
+          disabled={!plainLength(text) || Boolean(upload)}
           aria-label="Skicka"
         >
           <SendIcon />

@@ -102,6 +102,39 @@ async fn relay_status(
     Ok(state.0.lock().await.as_ref().map(|r| r.info.clone()))
 }
 
+/// Streams an attachment straight from the relay onto disk.
+///
+/// Two reasons this is not done in the webview. The file never exists in
+/// memory as a whole, so a two-gigabyte transfer costs the same as a small
+/// one; and writing from Rust is not bound by the webview's filesystem
+/// scope, so people can save wherever they actually want the file rather
+/// than only into Downloads, Documents or Desktop.
+#[tauri::command]
+async fn save_attachment(url: String, path: String) -> Result<u64, String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Servern svarade {}.", response.status().as_u16()));
+    }
+
+    let mut file = tokio::fs::File::create(&path)
+        .await
+        .map_err(|e| format!("Kunde inte skriva till {path}: {e}"))?;
+
+    let mut written: u64 = 0;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+        written += chunk.len() as u64;
+    }
+    file.flush().await.map_err(|e| e.to_string())?;
+
+    Ok(written)
+}
+
 /// Looks for offices being hosted on this network.
 ///
 /// Saves everyone the ritual of reading an IP address out loud: the hosting
@@ -128,7 +161,6 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             alert_window,
             focus_window,
@@ -136,6 +168,7 @@ pub fn run() {
             stop_relay,
             relay_status,
             discover_offices,
+            save_attachment,
             storage_location
         ])
         .setup(|app| {

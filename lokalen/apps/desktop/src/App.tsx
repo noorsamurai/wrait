@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Message } from "@lokalen/protocol";
+import { htmlToPlain } from "./lib/richtext";
 import { logout, type Session } from "./lib/client";
 import { loadSession, rememberedOperator, storeSession, useSettings } from "./lib/settings";
 import { unlockAudio } from "./lib/sound";
@@ -59,7 +60,7 @@ export function App() {
    */
   const saveMessage = useCallback(
     (message: Message) => {
-      const title = message.body.trim() || message.attachment?.name || "Sparat meddelande";
+      const title = htmlToPlain(message.body) || message.attachment?.name || "Sparat meddelande";
       comms.addTask({ title: title.slice(0, 300), sourceMessageId: message.id });
       setShowTasks(true);
     },

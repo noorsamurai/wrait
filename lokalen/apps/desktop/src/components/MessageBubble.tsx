@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Message } from "@lokalen/protocol";
 import { formatBytes, canDelete } from "@lokalen/protocol";
+import { htmlToPlain, sanitizeHtml } from "../lib/richtext";
 import { downloadUrl, type Session } from "../lib/client";
 import { saveAttachment } from "../lib/native";
 import { BellIcon, BookmarkIcon, DownloadIcon, FileIcon, PencilIcon, TrashIcon } from "./icons";
@@ -57,6 +58,34 @@ export function MessageBubble({
 
   const deletable = !pending && canDelete(message, selfId, now);
 
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  /**
+   * Copying, with and without what the text is wearing.
+   *
+   * Pasting a message onward into a journal system usually wants the words
+   * and not the styling, so plain text is offered as its own action rather
+   * than hidden behind a modifier key nobody discovers.
+   */
+  async function copy(withFormatting: boolean) {
+    setMenu(null);
+    const plain = htmlToPlain(message.body);
+    try {
+      if (withFormatting && typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": new Blob([sanitizeHtml(message.body)], { type: "text/html" }),
+            "text/plain": new Blob([plain], { type: "text/plain" }),
+          }),
+        ]);
+        return;
+      }
+      await navigator.clipboard.writeText(plain);
+    } catch {
+      // A denied clipboard is not worth an error dialog over.
+    }
+  }
+
   function commitEdit() {
     const next = draft.trim();
     setEditing(false);
@@ -99,7 +128,14 @@ export function MessageBubble({
 
   return (
     <div className="bubble-row" data-mine={mine}>
-      <div className={classes} data-run={run}>
+      <div
+        className={classes}
+        data-run={run}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setMenu({ x: event.clientX, y: event.clientY });
+        }}
+      >
         <div className="bubble__actions">
           {mine && !pending ? (
             <>
@@ -188,7 +224,12 @@ export function MessageBubble({
             </div>
           </div>
         ) : message.body ? (
-          <div>{message.body}</div>
+          // Sanitised again at render: the body arrived over the network, and
+          // trusting the sender's client would be the whole vulnerability.
+          <div
+            className="bubble__body"
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(message.body) }}
+          />
         ) : null}
 
         {/* An edit is never silent: both sides can read what it used to say. */}
@@ -205,6 +246,16 @@ export function MessageBubble({
                 ))
               : null}
           </div>
+        ) : null}
+
+        {menu ? (
+          <>
+            <div className="menu-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+            <div className="menu" style={{ left: menu.x, top: menu.y }} role="menu">
+              <button role="menuitem" onClick={() => copy(true)}>Kopiera</button>
+              <button role="menuitem" onClick={() => copy(false)}>Kopiera utan formatering</button>
+            </div>
+          </>
         ) : null}
 
         <div className="bubble__foot">

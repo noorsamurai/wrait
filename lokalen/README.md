@@ -283,6 +283,33 @@ uses to good effect. It is reimplemented here rather than borrowed as code:
 LocalSend is Dart, and being accountless by design it solves a different
 problem.
 
+**Rooms.** A clinic's rooms are places, not people: whoever is standing in
+Behandlingsrum 1 needs to reach Reception, and may be in a different room
+tomorrow. So each machine signs in as its room, picked once and remembered,
+and can optionally name who is at it — shown as "Behandlingsrum 1 · Anna"
+while the room stays the thing addressed. A room already in the office is
+taken over rather than duplicated, so a restarting PC keeps its history, but
+only while no other machine holds it. **Alla** is a channel every room sees.
+
+**Availability.** Two states, because those are the two a clinic uses:
+*Tillgänglig* and *Med patient*. Being with a patient shows in every other
+room and silences this machine — that is exactly when a chime is least
+welcome. A mute button sits beside the room in the roster rather than inside
+settings, because a control you have to go looking for is one nobody reaches
+in time.
+
+**Editing and deleting.** An edit keeps every earlier wording, and both sides
+can open the original: an edit that quietly replaced what someone already read
+would be worse than no editing at all. Deleting is allowed for five minutes
+and leaves a note that something was withdrawn rather than silently vacating
+the space. Both rules are enforced in the relays, not only in the UI.
+
+**Formatting.** Text pasted from a journal system, a web page or Word keeps
+its bold, italics, lists and links, through a strict allowlist that rebuilds
+the markup from a parsed tree — no attributes at all except a scheme-checked
+`href`, and sanitised again at render, since the body arrived over the
+network. Right-click any message to copy it with or without formatting.
+
 **Tasks.** Each person has a small list beside the conversation: a reminder,
 something to remember, something to do. A task can carry a date and is sorted
 by it, with undated ones last and cleared ones sunk to the bottom rather than
@@ -294,7 +321,12 @@ chat message can be saved into your own list with one click, which is the
 fastest path from "can you look at this" to something that will not be
 forgotten. Only the owner or the sender may change or delete a task.
 
-**File transfer.** Files are split into 512 KiB chunks and each chunk is
+**File transfer.** Saving streams from the relay straight to disk in Rust, so
+the file never exists in the webview as a whole — a 2 GB transfer costs the
+same memory as a small one — and the save dialog can write anywhere, rather
+than being confined to the webview's filesystem scope.
+
+Files are split into 512 KiB chunks and each chunk is
 written at its own byte offset in the destination file. Three consequences:
 chunks may arrive in any order, an interrupted upload resumes from what the
 server already holds, and only one chunk is ever resident in memory — a 1 GB
@@ -377,7 +409,13 @@ different machines — and has them chat, alert each other and exchange a 700 KB
 file, checking the downloaded bytes match what was sent. It runs unchanged
 against either relay, which is what proves the two are protocol-identical.
 
-The browser suite also covers the task list end to end across two machines:
+The browser suite covers rooms and the Alla channel, editing with the original
+still readable, deletion leaving its mark on both sides, drafts surviving a
+switch and a restart, and that pasted formatting survives while pasted script
+tags, `onerror` handlers and `javascript:` links do not — asserting that
+nothing executed on either machine.
+
+It also covers the task list end to end across two machines:
 a personal task, one delegated to a colleague, the recipient clearing it and
 the sender seeing that, hiding and re-showing cleared work, undoing a tick, and
 saving a chat message into the list.

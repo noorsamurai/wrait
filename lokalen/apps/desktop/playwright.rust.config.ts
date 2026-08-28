@@ -13,7 +13,7 @@ const dataDir = `./.e2e-data/rust-${Date.now().toString(36)}`;
 export default defineConfig({
   testDir: "./e2e",
   // Everything except the screenshot run, which is a capture rather than a check.
-  testMatch: /(messaging|tasks|rooms|editing)\.spec\.ts/,
+  testMatch: /(messaging|tasks|rooms|editing|richtext)\.spec\.ts/,
   timeout: 45_000,
   expect: { timeout: 10_000 },
   workers: 1,

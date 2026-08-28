@@ -4,6 +4,7 @@ import type {
 } from "@lokalen/protocol";
 import { Realtime, byConversation, conversationOf, type Session } from "./client";
 import { notify, requestAttention, requestNotificationAccess } from "./native";
+import { htmlToPlain } from "./richtext";
 import { playAlertTone, playMessageTone, playNudgeTone } from "./sound";
 import type { Settings } from "./settings";
 
@@ -300,7 +301,9 @@ export function useComms(session: Session | null, settings: Settings) {
     if (message.alert && !focused) void requestAttention();
     if (current.notifications && !looking) {
       const from = stateRef.current.users.find((u) => u.id === message.from);
-      const preview = message.body || (message.attachment ? `Sent ${message.attachment.name}` : "");
+      const preview =
+        htmlToPlain(message.body) ||
+        (message.attachment ? `Skickade ${message.attachment.name}` : "");
       void notify(from?.displayName ?? "New message", preview);
     }
   }, []);

@@ -64,17 +64,16 @@ export async function saveAttachment(url: string, suggestedName: string): Promis
     return "browser";
   }
 
-  const [{ save }, { writeFile }] = await Promise.all([
-    import("@tauri-apps/plugin-dialog"),
-    import("@tauri-apps/plugin-fs"),
-  ]);
+  const { save } = await import("@tauri-apps/plugin-dialog");
 
+  // A real save dialog: anywhere the person can write, not a fixed folder.
   const target = await save({ defaultPath: suggestedName });
   if (!target) return "cancelled";
 
-  const response = await fetch(url);
-  if (!response.ok) throw new Error("The file could not be downloaded.");
-  await writeFile(target, new Uint8Array(await response.arrayBuffer()));
+  // The shell streams it to disk. Reading the whole file into the webview
+  // first would put a 2 GB transfer in memory on a machine that may not have
+  // 2 GB to spare.
+  await command<number>("save_attachment", { url, path: target });
   return "saved";
 }
 

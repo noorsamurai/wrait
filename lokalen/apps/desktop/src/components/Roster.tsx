@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Availability, Message, User, UserId } from "@lokalen/protocol";
+import { htmlToPlain } from "../lib/richtext";
 import { Avatar } from "./Avatar";
 import { BellIcon, BellOffIcon, GearIcon, ListIcon, SearchIcon, UsersIcon } from "./icons";
 
@@ -21,7 +22,7 @@ function previewOf(messages: Message[] | undefined, selfId: UserId): string | nu
   const last = messages?.[messages.length - 1];
   if (!last) return null;
   const mine = last.from === selfId ? "Du: " : "";
-  if (last.body) return mine + last.body;
+  if (last.body) return mine + htmlToPlain(last.body);
   if (last.attachment) return `${mine}${last.attachment.name}`;
   return null;
 }
