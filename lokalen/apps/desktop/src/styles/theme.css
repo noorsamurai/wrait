@@ -40,8 +40,10 @@
   --surface-2: #292c31;
   --surface-3: #33373d;
 
-  --border: rgba(226, 220, 210, 0.10);
-  --border-strong: rgba(226, 220, 210, 0.18);
+  /* Used sparingly. Separation comes from the surface being a different
+     tone than the background, not from drawing a line around everything. */
+  --border: rgba(226, 220, 210, 0.07);
+  --border-strong: rgba(226, 220, 210, 0.14);
 
   --ink: #dcd8d1;
   --ink-soft: #9a958d;
@@ -75,8 +77,8 @@
     --surface-2: #efece7;
     --surface-3: #e3dfd8;
 
-    --border: rgba(58, 54, 48, 0.14);
-    --border-strong: rgba(58, 54, 48, 0.24);
+    --border: rgba(58, 54, 48, 0.09);
+    --border-strong: rgba(58, 54, 48, 0.18);
 
     --ink: #34312c;
     --ink-soft: #6b6660;
@@ -139,13 +141,19 @@ body {
 /* Surfaces                                                            */
 /* ------------------------------------------------------------------ */
 
+/*
+ * A panel is defined by its own tone against the window, not by an outline.
+ * Three bordered boxes side by side read as a form; three quiet planes read
+ * as one app.
+ */
 .surface {
   position: relative;
   background: var(--surface);
-  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
 }
 
+/* Only things that genuinely float get a shadow: a sheet over the app, and
+   the right-click menu. Everything else sits flat. */
 .surface--raised {
   box-shadow: var(--shadow-lifted);
 }
@@ -162,6 +170,7 @@ button {
   background: none;
 }
 
+/* Buttons carry no outline until you reach for them. */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -169,18 +178,29 @@ button {
   gap: 7px;
   padding: 8px 14px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  border: none;
   background: var(--surface-2);
   color: var(--ink);
   font-size: 13px;
   font-weight: 500;
-  transition: background 0.14s var(--ease), border-color 0.14s var(--ease);
+  transition: background 0.14s var(--ease), color 0.14s var(--ease);
   white-space: nowrap;
 }
 
 .btn:hover:not(:disabled) {
   background: var(--surface-3);
-  border-color: var(--border-strong);
+}
+
+/* Icon-only buttons stay invisible until hovered: a row of outlined squares
+   is most of what makes a toolbar look busy. */
+.btn--icon {
+  background: transparent;
+  color: var(--ink-soft);
+}
+
+.btn--icon:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
 }
 
 .btn:active:not(:disabled) { background: var(--surface-3); }
@@ -204,20 +224,22 @@ button {
   flex: 0 0 auto;
 }
 
+/* A field is a tinted well rather than a boxed line; the outline appears
+   only when it is the thing being used. */
 .field {
   width: 100%;
   padding: 9px 12px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   background: var(--surface-2);
   color: var(--ink);
   font: inherit;
   outline: none;
-  transition: border-color 0.14s var(--ease);
+  transition: border-color 0.14s var(--ease), background 0.14s var(--ease);
 }
 
 .field::placeholder { color: var(--ink-faint); }
-.field:focus { border-color: var(--accent); }
+.field:focus { border-color: var(--accent); background: var(--surface); }
 
 :focus-visible {
   outline: 2px solid var(--accent);

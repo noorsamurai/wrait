@@ -61,7 +61,7 @@ test("rum, Alla-kanalen, närvaro och snabbt ljudläge", async ({ browser }) => 
   });
 
   await test.step("Med patient syns i andra rum", async () => {
-    await rum1.getByRole("button", { name: "Med patient" }).click();
+    await rum1.getByRole("button", { name: "Tillgänglig" }).click();
     await expect(
       reception.locator(".roster").getByRole("option").filter({ hasText: "Behandlingsrum 1" }),
     ).toContainText("Med patient", { timeout: 10_000 });

@@ -216,10 +216,14 @@ export function Composer({
         </button>
       </div>
 
-      <div className="composer__hint">
-        <span>Enter skickar · Skift+Enter ger ny rad</span>
-        {alert ? <span style={{ color: "var(--alert)" }}>Deras dator kommer att pipa</span> : null}
-      </div>
+      {/* Shown while composing rather than permanently: it is a reminder,
+          not a label, and an always-on instruction is just noise. */}
+      {plainLength(text) > 0 || alert ? (
+        <div className="composer__hint">
+          {plainLength(text) > 0 ? <span>Enter skickar · Skift+Enter ger ny rad</span> : null}
+          {alert ? <span style={{ color: "var(--alert)" }}>Deras dator kommer att pipa</span> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

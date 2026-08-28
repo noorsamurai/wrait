@@ -58,7 +58,6 @@
   align-items: center;
   gap: 9px;
   padding: 10px 12px;
-  border-top: 1px solid var(--border);
 }
 
 .person {
@@ -165,8 +164,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 11px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: 11px 14px 10px;
 }
 
 .chat__head-body { flex: 1; min-width: 0; }
@@ -214,7 +212,6 @@
   padding: 7px 11px;
   border-radius: var(--radius-md);
   background: var(--surface-2);
-  border: 1px solid var(--border);
   font-size: 13.5px;
   overflow-wrap: anywhere;
 }
@@ -233,13 +230,14 @@
 
 /* An alert is marked by a solid edge and a label, not a glow: it still reads
    at a glance but does not smear light across the surrounding text. */
+/* An alert is marked by its tint and its label. An outline on top of both
+   was saying the same thing three times. */
 .bubble--alert {
-  border-color: var(--alert);
   background: var(--alert-soft);
 }
 
 .bubble--pending { opacity: 0.55; }
-.bubble--failed { border-color: var(--danger); }
+.bubble--failed { box-shadow: inset 0 0 0 1px var(--danger); }
 
 .bubble__foot {
   display: flex;
@@ -271,13 +269,11 @@
   padding: 7px 9px;
   border-radius: var(--radius-sm);
   background: var(--surface);
-  border: 1px solid var(--border);
   min-width: 220px;
 }
 
 .bubble--mine .attachment {
   background: rgba(27, 29, 33, 0.18);
-  border-color: rgba(242, 239, 233, 0.20);
 }
 
 .attachment__icon {
@@ -316,8 +312,7 @@
 /* Composer ----------------------------------------------------------- */
 
 .composer {
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
+  padding: 8px 12px 12px;
 }
 
 .composer__row {
@@ -333,16 +328,16 @@
   min-height: 34px;
   padding: 8px 11px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   background: var(--surface-2);
   color: var(--ink);
   font: inherit;
   font-size: 13.5px;
   outline: none;
-  transition: border-color 0.14s var(--ease);
+  transition: border-color 0.14s var(--ease), background 0.14s var(--ease);
 }
 
-.composer__input:focus { border-color: var(--accent); }
+.composer__input:focus { border-color: var(--accent); background: var(--surface); }
 
 .composer__hint {
   margin-top: 6px;
@@ -370,7 +365,6 @@
   padding: 7px 10px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
-  border: 1px solid var(--border);
   font-size: 12px;
 }
 
@@ -448,7 +442,6 @@
   padding: 2px;
   border-radius: var(--radius-md);
   background: var(--surface-2);
-  border: 1px solid var(--border);
   margin-bottom: 18px;
 }
 
@@ -464,7 +457,6 @@
 
 .segmented button[aria-selected="true"] {
   background: var(--surface);
-  border: 1px solid var(--border);
   color: var(--ink);
 }
 
@@ -472,8 +464,8 @@
   padding: 9px 11px;
   border-radius: var(--radius-sm);
   font-size: 12.5px;
-  background: rgba(176, 123, 123, 0.12);
-  border: 1px solid var(--danger);
+  background: rgba(176, 123, 123, 0.14);
+  color: var(--ink);
 }
 
 /* ------------------------------------------------------------------ */
@@ -514,15 +506,11 @@
   height: 22px;
   border-radius: var(--radius-pill);
   background: var(--surface-3);
-  border: 1px solid var(--border);
   position: relative;
   transition: background 0.16s var(--ease);
 }
 
-.switch[aria-checked="true"] {
-  background: var(--accent);
-  border-color: transparent;
-}
+.switch[aria-checked="true"] { background: var(--accent); }
 
 .switch::after {
   content: "";
@@ -642,18 +630,17 @@
 .chip {
   padding: 3px 10px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
+  border: none;
   background: var(--surface-2);
   font-size: 12px;
   font-weight: 500;
-  transition: background 0.12s var(--ease), border-color 0.12s var(--ease);
+  transition: background 0.12s var(--ease), color 0.12s var(--ease);
 }
 
 .chip:hover { background: var(--surface-3); }
 
 .chip[aria-pressed="true"] {
   background: var(--accent-soft);
-  border-color: var(--accent);
   color: var(--accent);
 }
 
@@ -681,8 +668,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 11px 10px 10px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: 11px 10px 8px 14px;
 }
 
 .tasks__title {
@@ -693,8 +679,7 @@
 }
 
 .tasks__new {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 4px 12px 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -726,8 +711,7 @@
 }
 
 .tasks__foot {
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
+  padding: 6px 12px 10px;
 }
 
 .tasks__toggle {
@@ -903,7 +887,6 @@
    it hides. */
 .bubble--tombstone {
   background: none;
-  border: 1px dashed var(--border-strong);
   color: var(--ink-faint);
   font-style: italic;
   font-size: 12.5px;
@@ -973,7 +956,7 @@
   margin-bottom: 8px;
   padding: 4px 12px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
+  border: none;
   background: var(--surface-2);
   font-size: 11.5px;
   color: var(--ink-soft);
@@ -1051,7 +1034,6 @@
   min-width: 190px;
   padding: 4px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border);
   background: var(--surface);
   box-shadow: var(--shadow-lifted);
   display: flex;
@@ -1067,3 +1049,15 @@
 }
 
 .menu button:hover { background: var(--surface-2); }
+
+/* The room's own availability, doubling as its subtitle. */
+.status-toggle {
+  display: block;
+  font-size: 12px;
+  color: var(--positive);
+  text-align: left;
+  padding: 0;
+}
+
+.status-toggle[data-busy="true"] { color: var(--alert); }
+.status-toggle:hover { text-decoration: underline; text-underline-offset: 2px; }

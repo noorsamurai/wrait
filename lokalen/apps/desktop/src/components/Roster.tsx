@@ -100,6 +100,9 @@ export function Roster({
         {openTaskCount > 0 ? <span className="badge">{openTaskCount}</span> : null}
       </div>
 
+      {/* A search box above four rooms is chrome, not help. It appears once
+          there is actually something to search through. */}
+      {users.length > 8 ? (
       <div className="roster__search">
         <div style={{ position: "relative" }}>
           <span style={{ position: "absolute", left: 12, top: 12, color: "var(--ink-faint)" }}>
@@ -115,6 +118,7 @@ export function Roster({
           />
         </div>
       </div>
+      ) : null}
 
       <div className="roster__list" role="listbox" aria-label="Rum">
         {channel && !query ? (
@@ -179,10 +183,24 @@ export function Roster({
         <div className="roster__self">
           <Avatar user={self} presence="online" availability={availability} />
           <span className="person__body">
-            <span className="person__name">{self.displayName}</span>
-            <span className="person__meta">
-              {self.operator ? self.operator : "Det här rummet"}
+            <span className="person__name">
+              {self.displayName}
+              {self.operator ? <span className="person__operator"> · {self.operator}</span> : null}
             </span>
+            {/* Two states need a switch, not a segmented control on its own
+                row: the label says where you are and clicking changes it. */}
+            <button
+              className="status-toggle"
+              data-busy={availability === "busy"}
+              onClick={() => onAvailability(availability === "busy" ? "available" : "busy")}
+              title={
+                availability === "busy"
+                  ? "Du är markerad som med patient, ljudet är tyst"
+                  : "Markera som med patient (tystar ljudet)"
+              }
+            >
+              {availability === "busy" ? "Med patient" : "Tillgänglig"}
+            </button>
           </span>
           {/* Muting lives here rather than in settings: it has to be one
               click from anywhere, which is the whole point of it. */}
@@ -200,23 +218,7 @@ export function Roster({
           </button>
         </div>
 
-        <div className="segmented segmented--status">
-          <button
-            type="button"
-            aria-selected={availability === "available"}
-            onClick={() => onAvailability("available")}
-          >
-            Tillgänglig
-          </button>
-          <button
-            type="button"
-            aria-selected={availability === "busy"}
-            onClick={() => onAvailability("busy")}
-            title="Stänger också av ljudet"
-          >
-            Med patient
-          </button>
-        </div>
+
       </div>
     </aside>
   );
