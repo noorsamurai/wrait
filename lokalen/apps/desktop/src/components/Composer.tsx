@@ -43,13 +43,22 @@ export function Composer({
     setError(null);
   }, [peer]);
 
-  useEffect(() => {
-    saveDraft(peer, text);
-  }, [peer, text]);
+  /**
+   * Records the draft as it is typed rather than from an effect on `text`.
+   *
+   * An effect keyed on `[peer, text]` fires once on the render where the room
+   * changed but `text` is still the previous room's, and so writes the old
+   * text under the new room's key. The next render corrects it, but anything
+   * that reads storage in between - a reload, above all - sees the wrong
+   * draft, or none.
+   */
+  function remember(value: string) {
+    setText(value);
+    saveDraft(peer, value);
+  }
 
   function clearEditor() {
-    setText("");
-    saveDraft(peer, "");
+    remember("");
     if (editor.current) editor.current.innerHTML = "";
   }
 
@@ -69,7 +78,7 @@ export function Composer({
     // execCommand is deprecated but is still the only thing that inserts at
     // the caret and leaves the browser's own undo stack intact.
     document.execCommand("insertHTML", false, fragment);
-    if (editor.current) setText(editor.current.innerHTML);
+    if (editor.current) remember(editor.current.innerHTML);
   }
 
   function escapePlain(value: string) {
@@ -147,7 +156,7 @@ export function Composer({
   }
 
   function onInput() {
-    setText(editor.current?.innerHTML ?? "");
+    remember(editor.current?.innerHTML ?? "");
     // Throttle: one typing ping per two seconds is plenty.
     const now = Date.now();
     if (now - lastTyping.current > 2000) {

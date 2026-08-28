@@ -174,6 +174,7 @@ export class Realtime {
   private closed = false;
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private outbox: ClientEvent[] = [];
 
   constructor(private session: Session, private onEvent: Handler, private onStatus: (up: boolean) => void) {}
 
@@ -185,6 +186,9 @@ export class Realtime {
 
     ws.onopen = () => {
       this.attempt = 0;
+      const waiting = this.outbox;
+      this.outbox = [];
+      for (const event of waiting) ws.send(JSON.stringify(event));
       this.onStatus(true);
     };
     ws.onmessage = (raw) => {
@@ -214,6 +218,14 @@ export class Realtime {
       this.ws.send(JSON.stringify(event));
       return true;
     }
+    // The socket is briefly shut on every launch and after every sleep, so a
+    // task added or a message edited in that window would otherwise vanish
+    // without a trace. Anything that changes stored state waits for the
+    // socket instead; anything only worth saying right now is let go.
+    if (DURABLE.has(event.t)) {
+      this.outbox.push(event);
+      if (this.outbox.length > OUTBOX_LIMIT) this.outbox.shift();
+    }
     return false;
   }
 
@@ -223,6 +235,23 @@ export class Realtime {
     this.ws?.close();
   }
 }
+
+/**
+ * The events worth holding on to while the socket is down.
+ *
+ * Typing pings, read receipts, history requests and searches are all about
+ * this moment; replaying them after a reconnect would be noise at best.
+ * `send` is absent on purpose - an unsent message keeps its own visible
+ * pending state and retry, which says more than a silent queue would.
+ */
+const DURABLE = new Set<ClientEvent["t"]>([
+  "taskAdd", "taskEdit", "taskClear", "taskDelete",
+  "messageEdit", "messageDelete",
+  "availability", "operator",
+]);
+
+/** Enough for a spell offline, small enough never to matter. */
+const OUTBOX_LIMIT = 200;
 
 /**
  * Which conversation a message belongs to.

@@ -14,6 +14,8 @@ const dataDir = `./.e2e-data/run-${Date.now().toString(36)}`;
  */
 export default defineConfig({
   testDir: "./e2e",
+  // Everything except the screenshot run, which is a capture rather than a check.
+  testMatch: /(messaging|tasks|rooms|editing|richtext|search|photos)\.spec\.ts/,
   timeout: 45_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

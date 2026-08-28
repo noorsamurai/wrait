@@ -47,7 +47,7 @@ jobs:
       - run: pnpm --filter @lokalen/desktop exec playwright install --with-deps chromium
       - run: pnpm build
       - name: Browser suite against the Node relay
-        run: pnpm --filter @lokalen/desktop exec playwright test messaging
+        run: pnpm --filter @lokalen/desktop exec playwright test
       - name: Build the embedded relay binary
         working-directory: lokalen/apps/desktop/src-tauri
         run: cargo build --bin relay
