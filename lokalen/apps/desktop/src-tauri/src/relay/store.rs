@@ -16,6 +16,8 @@ use super::model::{
     initials_of, now_ms, Attachment, Message, OfficeInfo, OfficeMode, Revision, Task, User,
     BROADCAST_ROOM, DEFAULT_ROOMS,
 };
+use super::oplog;
+use crate::args;
 
 /// Matches the Node relay: N=2^14, r=8, p=1, 64-byte output.
 const LOG_N: u8 = 14;
@@ -29,15 +31,25 @@ pub type Db = Arc<Mutex<Connection>>;
 
 pub fn open(path: Option<&Path>) -> rusqlite::Result<Db> {
     let conn = match path {
-        Some(p) => {
-            if let Some(dir) = p.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            Connection::open(p)?
-        }
-        None => Connection::open_in_memory()?,
+        Some(p) => open_connection(p)?,
+        None => prepare(Connection::open_in_memory()?)?,
     };
+    Ok(Arc::new(Mutex::new(conn)))
+}
 
+/// Opens one database file, creating it and its schema if need be.
+///
+/// Separate from `open` because a standby replaces its whole database with a
+/// copy of the host's and has to reopen the file underneath a connection that
+/// is already being shared.
+pub fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    prepare(Connection::open(path)?)
+}
+
+fn prepare(conn: Connection) -> rusqlite::Result<Connection> {
     conn.pragma_update(None, "journal_mode", "WAL").ok();
     conn.pragma_update(None, "foreign_keys", "ON").ok();
     conn.execute_batch(
@@ -80,6 +92,16 @@ pub fn open(path: Option<&Path>) -> rusqlite::Result<Db> {
           file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
           idx     INTEGER NOT NULL,
           PRIMARY KEY (file_id, idx)
+        );
+
+        -- Every write the office has ever made, in order. This is what a
+        -- standby machine replays to hold a complete copy, and what it
+        -- continues from if it has to take over as host.
+        CREATE TABLE IF NOT EXISTS oplog (
+          seq  INTEGER PRIMARY KEY AUTOINCREMENT,
+          at   INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          args TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS settings (
@@ -131,7 +153,7 @@ pub fn open(path: Option<&Path>) -> rusqlite::Result<Db> {
         "#,
     )?;
 
-    Ok(Arc::new(Mutex::new(conn)))
+    Ok(conn)
 }
 
 /* ------------------------------------------------------------------ */
@@ -286,10 +308,10 @@ pub fn create_user(db: &Db, username: &str, display_name: &str, password: &str) 
     let (hash, salt) = hash_password(password);
     let id = uuid::Uuid::new_v4().to_string();
     let conn = db.lock().unwrap();
-    match conn.execute(
-        "INSERT INTO users (id, username, display_name, pw_hash, pw_salt, created_at, last_seen)
-         VALUES (?, ?, ?, ?, ?, ?, NULL)",
-        params![id, username, display_name, hash, salt, now_ms()],
+    match oplog::write(
+        &conn,
+        &oplog::USER_CREATE,
+        args![id, username, display_name, hash, salt, now_ms()],
     ) {
         Ok(_) => CreateUser::Created(id),
         // A concurrent signup with the same name loses the UNIQUE race.
@@ -299,10 +321,7 @@ pub fn create_user(db: &Db, username: &str, display_name: &str, password: &str) 
 
 pub fn touch_user(db: &Db, id: &str) {
     let conn = db.lock().unwrap();
-    let _ = conn.execute(
-        "UPDATE users SET last_seen = ? WHERE id = ?",
-        params![now_ms(), id],
-    );
+    let _ = oplog::write(&conn, &oplog::USER_TOUCH, args![now_ms(), id]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -313,9 +332,10 @@ pub fn create_session(db: &Db, user_id: &str) -> String {
     let token = random_hex(32);
     let now = now_ms();
     let conn = db.lock().unwrap();
-    let _ = conn.execute(
-        "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-        params![hash_token(&token), user_id, now, now + SESSION_TTL_MS],
+    let _ = oplog::write(
+        &conn,
+        &oplog::SESSION_CREATE,
+        args![hash_token(&token), user_id, now, now + SESSION_TTL_MS],
     );
     token
 }
@@ -338,10 +358,7 @@ pub fn resolve_session(db: &Db, token: &str) -> Option<UserRow> {
 
 pub fn destroy_session(db: &Db, token: &str) {
     let conn = db.lock().unwrap();
-    let _ = conn.execute(
-        "DELETE FROM sessions WHERE token_hash = ?",
-        params![hash_token(token)],
-    );
+    let _ = oplog::write(&conn, &oplog::SESSION_DESTROY, args![hash_token(token)]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -419,10 +436,10 @@ pub fn insert_message(
     let id = uuid::Uuid::new_v4().to_string();
     {
         let conn = db.lock().unwrap();
-        conn.execute(
-            "INSERT INTO messages (id, client_id, from_id, to_id, body, body_plain, alert, file_id, sent_at, read_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
-            params![
+        oplog::write(
+            &conn,
+            &oplog::MESSAGE_INSERT,
+            args![
                 id, client_id, from, to, body, searchable_text(body),
                 alert as i64, file_id, now_ms()
             ],
@@ -536,10 +553,10 @@ pub fn history_before(
 
 pub fn mark_read(db: &Db, user_id: &str, peer: &str, up_to: i64) {
     let conn = db.lock().unwrap();
-    let _ = conn.execute(
-        "UPDATE messages SET read_at = ?
-          WHERE to_id = ? AND from_id = ? AND sent_at <= ? AND read_at IS NULL",
-        params![now_ms(), user_id, peer, up_to],
+    let _ = oplog::write(
+        &conn,
+        &oplog::MESSAGE_READ,
+        args![now_ms(), user_id, peer, up_to],
     );
 }
 
@@ -557,11 +574,7 @@ pub fn get_setting(db: &Db, key: &str) -> Option<String> {
 
 pub fn set_setting(db: &Db, key: &str, value: &str) {
     let conn = db.lock().unwrap();
-    let _ = conn.execute(
-        "INSERT INTO settings (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        params![key, value],
-    );
+    let _ = oplog::write(&conn, &oplog::SETTING_SET, args![key, value]);
 }
 
 /// Fixes the office's mode and name the first time it is created.
@@ -577,6 +590,22 @@ pub fn init_office(db: &Db, mode: OfficeMode, name: &str) {
     }
 }
 
+/// The office's own identity, created once and carried by every copy of it.
+///
+/// Machines use it to tell their own office from someone else's on the same
+/// network, so a clinic and the dental practice next door never try to take
+/// over each other's history.
+pub fn office_id(db: &Db) -> String {
+    if let Some(id) = get_setting(db, "office_id") {
+        if !id.is_empty() {
+            return id;
+        }
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    set_setting(db, "office_id", &id);
+    id
+}
+
 pub fn office_info(db: &Db) -> OfficeInfo {
     OfficeInfo {
         name: get_setting(db, "office_name").unwrap_or_else(|| "Lokalen".into()),
@@ -590,12 +619,7 @@ pub fn create_guest(db: &Db, display_name: &str) -> Option<String> {
     let id = uuid::Uuid::new_v4().to_string();
     let username = format!("gast-{}", &id[..8]);
     let conn = db.lock().unwrap();
-    conn.execute(
-        "INSERT INTO users (id, username, display_name, pw_hash, pw_salt, created_at, last_seen)
-         VALUES (?, ?, ?, '', '', ?, NULL)",
-        params![id, username, display_name, now_ms()],
-    )
-    .ok()?;
+    oplog::write(&conn, &oplog::USER_GUEST, args![id, username, display_name, now_ms()]).ok()?;
     Some(id)
 }
 
@@ -638,10 +662,10 @@ pub fn insert_task(
     let id = uuid::Uuid::new_v4().to_string();
     {
         let conn = db.lock().unwrap();
-        conn.execute(
-            "INSERT INTO tasks (id, owner_id, created_by, title, notes, due_at, cleared_at, created_at, source_message_id)
-             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)",
-            params![id, owner, created_by, title, notes, due_at, now_ms(), source_message_id],
+        oplog::write(
+            &conn,
+            &oplog::TASK_INSERT,
+            args![id, owner, created_by, title, notes, due_at, now_ms(), source_message_id],
         )
         .ok()?;
     }
@@ -673,28 +697,25 @@ pub fn tasks_for(db: &Db, user_id: &str, limit: i64) -> Vec<Task> {
 
 pub fn set_task_cleared(db: &Db, id: &str, cleared: bool) {
     let conn = db.lock().unwrap();
-    let _ = conn.execute(
-        "UPDATE tasks SET cleared_at = ? WHERE id = ?",
-        params![cleared.then(now_ms), id],
-    );
+    let _ = oplog::write(&conn, &oplog::TASK_CLEARED, args![cleared.then(now_ms), id]);
 }
 
 pub fn edit_task(db: &Db, id: &str, title: Option<&str>, notes: Option<&str>, due_at: Option<Option<i64>>) {
     let conn = db.lock().unwrap();
     if let Some(title) = title {
-        let _ = conn.execute("UPDATE tasks SET title = ? WHERE id = ?", params![title, id]);
+        let _ = oplog::write(&conn, &oplog::TASK_TITLE, args![title, id]);
     }
     if let Some(notes) = notes {
-        let _ = conn.execute("UPDATE tasks SET notes = ? WHERE id = ?", params![notes, id]);
+        let _ = oplog::write(&conn, &oplog::TASK_NOTES, args![notes, id]);
     }
     if let Some(due) = due_at {
-        let _ = conn.execute("UPDATE tasks SET due_at = ? WHERE id = ?", params![due, id]);
+        let _ = oplog::write(&conn, &oplog::TASK_DUE, args![due, id]);
     }
 }
 
 pub fn delete_task(db: &Db, id: &str) {
     let conn = db.lock().unwrap();
-    let _ = conn.execute("DELETE FROM tasks WHERE id = ?", params![id]);
+    let _ = oplog::write(&conn, &oplog::TASK_DELETE, args![id]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -749,10 +770,10 @@ pub fn create_room(db: &Db, display_name: &str, kind: &str) -> Option<String> {
         if taken.is_some() {
             username = format!("{username}-{}", &id[..4]);
         }
-        conn.execute(
-            "INSERT INTO users (id, username, display_name, pw_hash, pw_salt, created_at, last_seen, kind)
-             VALUES (?, ?, ?, '', '', ?, NULL, ?)",
-            params![id, username, display_name, now_ms(), kind],
+        oplog::write(
+            &conn,
+            &oplog::ROOM_CREATE,
+            args![id, username, display_name, now_ms(), kind],
         )
         .ok()?;
     }
@@ -785,10 +806,7 @@ pub fn room_names(db: &Db) -> Vec<String> {
 pub fn set_availability(db: &Db, id: &str, availability: &str) {
     let value = if availability == "busy" { "busy" } else { "available" };
     let conn = db.lock().unwrap();
-    let _ = conn.execute(
-        "UPDATE users SET availability = ? WHERE id = ?",
-        params![value, id],
-    );
+    let _ = oplog::write(&conn, &oplog::USER_AVAILABILITY, args![value, id]);
 }
 
 pub fn set_operator(db: &Db, id: &str, name: Option<&str>) {
@@ -796,10 +814,7 @@ pub fn set_operator(db: &Db, id: &str, name: Option<&str>) {
         .map(|n| n.trim().chars().take(64).collect::<String>())
         .filter(|n| !n.is_empty());
     let conn = db.lock().unwrap();
-    let _ = conn.execute(
-        "UPDATE users SET operator = ? WHERE id = ?",
-        params![trimmed, id],
-    );
+    let _ = oplog::write(&conn, &oplog::USER_OPERATOR, args![trimmed, id]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -816,13 +831,11 @@ pub fn edit_message(db: &Db, id: &str, body: &str) {
         .flatten();
     let Some(current) = current else { return };
     let at = now_ms();
-    let _ = conn.execute(
-        "INSERT INTO message_revisions (message_id, body, replaced_at) VALUES (?, ?, ?)",
-        params![id, current, at],
-    );
-    let _ = conn.execute(
-        "UPDATE messages SET body = ?, body_plain = ?, edited_at = ? WHERE id = ?",
-        params![body, searchable_text(body), at, id],
+    let _ = oplog::write(&conn, &oplog::REVISION_INSERT, args![id, current, at]);
+    let _ = oplog::write(
+        &conn,
+        &oplog::MESSAGE_EDIT,
+        args![body, searchable_text(body), at, id],
     );
 }
 
@@ -833,11 +846,8 @@ pub fn edit_message(db: &Db, id: &str, body: &str) {
 /// wordings go too, or deleting would be a way to publish them.
 pub fn delete_message(db: &Db, id: &str) {
     let conn = db.lock().unwrap();
-    let _ = conn.execute("DELETE FROM message_revisions WHERE message_id = ?", params![id]);
-    let _ = conn.execute(
-        "UPDATE messages SET body = '', body_plain = '', file_id = NULL, deleted_at = ? WHERE id = ?",
-        params![now_ms(), id],
-    );
+    let _ = oplog::write(&conn, &oplog::REVISION_CLEAR, args![id]);
+    let _ = oplog::write(&conn, &oplog::MESSAGE_DELETE, args![now_ms(), id]);
 }
 
 /// Messages this room can see, matching every word of the query.

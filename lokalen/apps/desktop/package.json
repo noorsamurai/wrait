@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "e2e": "playwright test",
-    "perf": "node perf/measure-appearance.mjs"
+    "perf": "node perf/measure-appearance.mjs",
+    "ios": "tauri ios dev",
+    "ios:init": "tauri ios init",
+    "ios:build": "tauri ios build"
   },
   "dependencies": {
     "@lokalen/protocol": "workspace:*",

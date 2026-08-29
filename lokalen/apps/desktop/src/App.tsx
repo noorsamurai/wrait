@@ -4,6 +4,7 @@ import { htmlToPlain } from "./lib/richtext";
 import { logout, type Session } from "./lib/client";
 import { loadSession, rememberedOperator, storeSession, useSettings } from "./lib/settings";
 import { unlockAudio } from "./lib/sound";
+import { clusterStatus, joinOffice, onOfficeMoved, setBadge, type ClusterStatus } from "./lib/native";
 import { useComms } from "./lib/useComms";
 import { Ambient } from "./components/Ambient";
 import { Conversation } from "./components/Conversation";
@@ -19,6 +20,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [cluster, setCluster] = useState<ClusterStatus | null>(null);
 
   const comms = useComms(session, settings);
 
@@ -34,6 +36,41 @@ export function App() {
     };
   }, []);
 
+  /**
+   * Keeps this computer's own copy of the office, and follows the office if
+   * it moves to another machine.
+   *
+   * A relay lives on one computer, and that computer gets switched off at the
+   * end of a shift. So every machine that signs in also stands by: it keeps a
+   * copy, and if the host goes quiet one of them starts serving instead. All
+   * this part has to do is notice and point the window at wherever the office
+   * ended up.
+   */
+  useEffect(() => {
+    if (!session) return;
+    let live = true;
+
+    const arrivedAt = (status: ClusterStatus) => {
+      if (!live) return;
+      setCluster(status);
+      const host = status.host;
+      if (!host || host === session.serverUrl) return;
+      const next = { ...session, serverUrl: host };
+      storeSession(next);
+      setSession(next);
+    };
+
+    void joinOffice(session.serverUrl, session.token).then((status) => status && arrivedAt(status));
+    // The office may have moved while this machine was closed.
+    void clusterStatus().then((status) => status && arrivedAt(status));
+
+    const stop = onOfficeMoved(arrivedAt);
+    return () => {
+      live = false;
+      void stop.then((off) => off());
+    };
+  }, [session]);
+
   // Tell the office who is at this room, if the person said on sign-in.
   useEffect(() => {
     if (!comms.ready) return;
@@ -47,6 +84,9 @@ export function App() {
   // says something useful in the taskbar or dock.
   useEffect(() => {
     document.title = comms.totalUnread > 0 ? `(${comms.totalUnread}) Lokalen` : "Lokalen";
+    // And on the tray icon, which is where someone looks when the window is
+    // put away rather than closed.
+    void setBadge(comms.totalUnread);
   }, [comms.totalUnread]);
 
   const signIn = useCallback((next: Session) => {
@@ -187,6 +227,7 @@ export function App() {
           onSignOut={signOut}
           onClose={() => setShowSettings(false)}
           serverUrl={session.serverUrl}
+          cluster={cluster}
         />
       ) : null}
     </>

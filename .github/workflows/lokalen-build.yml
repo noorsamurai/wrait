@@ -158,3 +158,55 @@ jobs:
             lokalen/apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             lokalen/apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app
           if-no-files-found: warn
+
+  ios:
+    name: iOS project
+    runs-on: macos-latest
+    # Installing on a phone needs an Apple developer account and a device that
+    # trusts it, neither of which belongs in CI. What CI can do is prove the
+    # project generates and the app compiles for iOS, and hand over the Xcode
+    # project to open on a Mac.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: lokalen/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lokalen/apps/desktop/src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate the Xcode project
+        run: pnpm --filter @lokalen/desktop tauri ios init --ci
+
+      # For the simulator, which needs no signing identity. A device build is
+      # the same code with a team id attached, which only the owner has.
+      - name: Compile for the simulator
+        run: |
+          pnpm build
+          project=$(ls -d apps/desktop/src-tauri/gen/apple/*.xcodeproj | head -1)
+          scheme=$(basename "$project" .xcodeproj)_iOS
+          xcodebuild build \
+            -project "$project" \
+            -scheme "$scheme" \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration debug \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Upload the Xcode project
+        uses: actions/upload-artifact@v4
+        with:
+          name: lokalen-ios-xcode
+          path: lokalen/apps/desktop/src-tauri/gen/apple
+          if-no-files-found: warn

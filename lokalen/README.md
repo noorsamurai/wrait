@@ -150,6 +150,76 @@ A hardware-token EV certificate cannot be base64'd into a secret; those need a
 cloud signing service (Azure Trusted Signing, SSL.com eSigner) and a different
 CI step, which is worth wiring up once you have picked a provider.
 
+## When a computer is switched off
+
+An office is one relay and several clients. That is fine right up until the
+computer running it is shut down at the end of a shift, at which point everyone
+else is looking at a dead window even though they are all still at their desks.
+
+So every machine that signs in keeps its own complete copy of the office, and
+the ones that are not hosting stand by:
+
+* **Replication.** Each write - a message, an edit, a task, a session - is
+  appended to the office's log. Standby machines follow that log over a
+  long-poll and apply it to their own copy, a few hundred milliseconds behind.
+  Attachments are fetched as their rows arrive, so the bytes travel too.
+* **Taking over.** When the host stops announcing itself for ten seconds, the
+  standbys say out loud how much of the log they hold. The one holding the most
+  starts serving; a tie is broken by machine id, the same way round on every
+  machine. Everyone else follows the new beacon and reconnects, sessions
+  included, so nobody signs in again.
+* **Coming back.** A machine that returns to find a later round of hosting
+  steps down and takes a fresh copy. It does **not** merge: anything it wrote
+  while it was cut off is discarded. A machine nobody could reach was not
+  taking anyone's messages, and a half-merged history is worse than a short
+  one.
+
+Two consequences worth knowing. Every machine in the office holds the whole
+office, so an office on an untrusted network should be created in the
+passworded mode. And a message sent in the moment between the host going quiet
+and the takeover is not delivered - the sender sees it stay unsent, with a
+retry, rather than believing it arrived.
+
+### The always-on machine (Windows only, optional)
+
+Failover covers the ordinary case. If you would rather one machine simply
+always hosted - the one in the back room nobody logs into - the same exe can
+register itself with Windows and run the relay with no window and no signed-in
+user. From an **administrator** command prompt:
+
+```
+lokalen.exe --install-service
+lokalen.exe --uninstall-service
+```
+
+This is the one part of the app that installs something, which is why it is
+opt-in and never happens on its own.
+
+## Backing the office up
+
+Everything the office is - accounts, rooms, every message, every attachment -
+lives in one folder on one computer, and disks fail. Settings → **Den här
+datorn** → *Säkerhetskopia* writes the lot to a single `.lokalen` file, and
+*Återställ* reads one back.
+
+The file is itself a SQLite database: the office's own, copied cleanly inside a
+read transaction, with the attachments carried in it. There is no archive
+format to get wrong, and it can be opened years from now by anything that
+speaks SQL. Restoring starts a new round of hosting, so the other machines
+follow the restored history rather than carrying on with the one it replaced.
+
+There is no automatic expiry. Nothing is deleted unless someone deletes it.
+
+## In the tray
+
+Closing the window puts the app in the notification area rather than quitting -
+a messenger that is not running is a messenger nobody can reach, and the close
+button is how most people put something away. The tray icon carries the unread
+count; a left click brings the window back, a right click offers *Visa* and
+*Avsluta*.
+
+Settings → **Starta med datorn** makes it open at login. Off by default.
+
 ## Uninstalling
 
 There is no uninstaller, because there is no install:
@@ -159,7 +229,11 @@ There is no uninstaller, because there is no install:
    webview profile, and if this machine hosted, the relay database and every
    transferred file
 
-Nothing is written to the registry or to AppData. Two footnotes: if the exe sat
+Two things do live outside that folder once you have asked for them: the
+autostart entry (Windows: `HKCU\...\Run`; macOS: a login item), removed by
+turning *Starta med datorn* off, and the Windows service, removed with
+`lokalen.exe --uninstall-service`. Otherwise nothing is written to the registry
+or to AppData. Two footnotes: if the exe sat
 somewhere unwritable (Program Files, read-only media) it fell back to
 `%APPDATA%\Lokalen`, so delete that too; and the Windows Firewall rule created
 when you allowed the prompt survives — remove it under Windows Defender
@@ -481,6 +555,27 @@ two office modes refusing each other's entry paths, a name-only account being
 unreachable through the password path, a name being reclaimed rather than
 duplicated when the same person signs in from another machine, and a real
 beacon on a real socket being discoverable while hosting and gone once stopped.
+
+## macOS and iPhone
+
+The macOS app is built by CI on every push - a universal binary covering Apple
+silicon and Intel - and published as `lokalen-macos`. It is unsigned, so the
+first launch needs right-click → Open rather than a double-click.
+
+iPhone needs your own Apple ID, because installing on a device you own is
+something only you can sign for. On a Mac with Xcode installed:
+
+```bash
+pnpm install
+pnpm --filter @lokalen/desktop ios:init     # generates the Xcode project, once
+pnpm --filter @lokalen/desktop ios          # runs it on a simulator or device
+```
+
+`ios:init` writes `apps/desktop/src-tauri/gen/apple`. Open the `.xcodeproj`
+there, set *Signing & Capabilities* → Team to your own Apple ID, and Xcode will
+install it on a plugged-in phone. CI compiles the same project for the
+simulator on every push, so a break in the iOS build shows up without a Mac,
+but nothing on CI can sign for a device.
 
 ## Security notes
 

@@ -59,7 +59,15 @@ function play(tones: ToneSpec[], volume: number) {
   }
 }
 
-/** Quiet two-note rise for an ordinary incoming message. */
+/**
+ * Two sounds, and only two.
+ *
+ * A set of tones people have to learn is a set of tones they ignore. One says
+ * "there is a message", the other says "this one is for you now" - which is
+ * the only distinction anyone in a clinic acts on differently.
+ */
+
+/** Quiet two-note rise: an ordinary incoming message. */
 export function playMessageTone(volume = 0.6) {
   play(
     [
@@ -70,23 +78,15 @@ export function playMessageTone(volume = 0.6) {
   );
 }
 
-/** Brighter, more insistent triple chime for a message flagged as an alert. */
-export function playAlertTone(volume = 0.85) {
-  play(
-    [
-      { frequency: 880, start: 0, duration: 0.18, gain: 0.24 },
-      { frequency: 1109, start: 0.13, duration: 0.18, gain: 0.24 },
-      { frequency: 1319, start: 0.26, duration: 0.34, gain: 0.26 },
-    ],
-    volume,
-  );
-}
-
 /**
- * The "get up and look at your screen" sound - a deliberately attention-
- * grabbing sawtooth pattern, used for an explicit nudge.
+ * Lower, repeated and harder to mistake for the first: an alert, or somebody
+ * asking you to come to their room.
+ *
+ * Deliberately not simply louder. A tone that differs only in volume is the
+ * one that gets missed across a corridor, so this differs in pitch, in rhythm
+ * and in timbre as well.
  */
-export function playNudgeTone(volume = 1) {
+export function playUrgentTone(volume = 0.9) {
   play(
     [
       { frequency: 660, start: 0, duration: 0.14, gain: 0.3, type: "triangle" },

@@ -138,6 +138,52 @@ export function relayStatus() {
   return command<RelayInfo | null>("relay_status").catch(() => null);
 }
 
+/** This machine's part in the office, and where the office currently is. */
+export interface ClusterStatus {
+  /** "idle" | "host" | "standby" | "seeking" */
+  role: string;
+  /** Where the office is being served right now. */
+  host: string;
+  /** True when that is this very machine. */
+  hosting: boolean;
+  office: string;
+  term: number;
+  /** How much of the office's history this machine holds. */
+  watermark: number;
+}
+
+/**
+ * Tells the shell to keep a copy of the office this machine just joined.
+ *
+ * Without it a computer is only a client, and switching off whichever machine
+ * happens to be hosting takes the whole office down with it. With it, every
+ * machine follows along and one of them can take over.
+ */
+export function joinOffice(url: string, token: string) {
+  return command<ClusterStatus>("join_office", { url, token }).catch(() => null);
+}
+
+/** Where the office is being served, or null outside the native shell. */
+export function clusterStatus() {
+  return command<ClusterStatus | null>("cluster_status").catch(() => null);
+}
+
+/**
+ * Calls back whenever the office moves to another computer.
+ *
+ * Resolves to an unsubscribe function, or to a no-op in the browser, where
+ * there is no shell to move anything.
+ */
+export async function onOfficeMoved(handler: (status: ClusterStatus) => void): Promise<() => void> {
+  if (!inTauri()) return () => {};
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    return await listen<ClusterStatus>("office-moved", (event) => handler(event.payload));
+  } catch {
+    return () => {};
+  }
+}
+
 export interface DiscoveredOffice {
   id: string;
   /** The hosting computer's name. */
@@ -155,6 +201,66 @@ export function discoverOffices(timeoutMs?: number) {
   return command<DiscoveredOffice[]>("discover_offices", { timeoutMs })
     .then((found) => found ?? [])
     .catch(() => []);
+}
+
+/* ------------------------------------------------------------------ */
+/* Living in the tray, and keeping a copy                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Puts the unread count on the tray icon.
+ *
+ * The window spends most of its life behind a journal system, so the tray is
+ * where anyone actually looks to see whether something is waiting.
+ */
+export function setBadge(unread: number) {
+  return command<null>("set_badge", { unread }).catch(() => null);
+}
+
+/** Whether the app opens itself when this computer starts. */
+export function autostartEnabled() {
+  return command<boolean>("autostart_enabled").catch(() => false);
+}
+
+export function setAutostart(enabled: boolean) {
+  return command<boolean>("set_autostart", { enabled });
+}
+
+/** What a backup turned out to contain. */
+export interface BackupSummary {
+  messages: number;
+  files: number;
+  bytes: number;
+  path: string;
+}
+
+/**
+ * Writes the whole office to one file the person picks.
+ *
+ * Returns null if they cancelled the dialog, which is not an error.
+ */
+export async function exportOffice(): Promise<BackupSummary | null> {
+  if (!inTauri()) return null;
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const stamp = new Date().toISOString().slice(0, 10);
+  const target = await save({
+    defaultPath: `lokalen-${stamp}.lokalen`,
+    filters: [{ name: "Lokalen-säkerhetskopia", extensions: ["lokalen"] }],
+  });
+  if (!target) return null;
+  return command<BackupSummary>("export_office", { path: target });
+}
+
+/** Replaces this office with one from a backup file. */
+export async function importOffice(): Promise<BackupSummary | null> {
+  if (!inTauri()) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const chosen = await open({
+    multiple: false,
+    filters: [{ name: "Lokalen-säkerhetskopia", extensions: ["lokalen"] }],
+  });
+  if (typeof chosen !== "string") return null;
+  return command<BackupSummary>("import_office", { path: chosen });
 }
 
 /** Where the app keeps its data, and whether that is beside the exe. */

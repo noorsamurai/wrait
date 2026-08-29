@@ -1,5 +1,7 @@
 pub mod portable;
 pub mod relay;
+#[cfg(windows)]
+pub mod service;
 
 use tauri::Window;
 
@@ -54,9 +56,47 @@ fn focus_window(window: Window) -> Result<(), String> {
     Ok(())
 }
 
-/// Live handle on the relay this machine is hosting, if any.
+/// This machine's part in the office: hosting it, or standing by to.
 #[derive(Default)]
-pub struct HostedRelay(tokio::sync::Mutex<Option<relay::Relay>>);
+pub struct Office(tokio::sync::Mutex<Option<std::sync::Arc<relay::cluster::Node>>>);
+
+/// Opens this machine's copy of the office, once.
+///
+/// The supervisor started here is what keeps the office alive when a computer
+/// is switched off: it follows whoever is hosting and, if nobody is, offers to
+/// take over.
+async fn office_node(
+    app: &tauri::AppHandle,
+    state: &tauri::State<'_, Office>,
+    port: Option<u16>,
+    mode: Option<String>,
+    name: Option<String>,
+) -> std::sync::Arc<relay::cluster::Node> {
+    let mut held = state.0.lock().await;
+    if let Some(node) = held.as_ref() {
+        return node.clone();
+    }
+
+    let node = relay::cluster::Node::open(
+        &portable::relay_dir(),
+        port.unwrap_or(8787),
+        // Open by default: typing a name is the whole point of an office
+        // somebody starts from a portable exe.
+        &name.unwrap_or_else(|| "Lokalen".to_string()),
+        relay::model::OfficeMode::parse(mode.as_deref().unwrap_or("open")),
+    );
+
+    let handle = app.clone();
+    relay::cluster::supervise(node.clone(), move |status| {
+        use tauri::Emitter;
+        // The window is holding a socket to a machine that may have just been
+        // switched off, so it has to be told where the office went.
+        let _ = handle.emit("office-moved", status);
+    });
+
+    *held = Some(node.clone());
+    node
+}
 
 /// Starts hosting an office on this computer.
 ///
@@ -65,41 +105,53 @@ pub struct HostedRelay(tokio::sync::Mutex<Option<relay::Relay>>);
 /// Node, no database to install, nothing unpacked at launch.
 #[tauri::command]
 async fn start_relay(
-    state: tauri::State<'_, HostedRelay>,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Office>,
     port: Option<u16>,
     mode: Option<String>,
     name: Option<String>,
 ) -> Result<relay::RelayInfo, String> {
-    let mut hosted = state.0.lock().await;
-    if let Some(existing) = hosted.as_ref() {
-        // Already hosting: report the running relay rather than binding twice.
-        return Ok(existing.info.clone());
-    }
+    let node = office_node(&app, &state, port, mode, name).await;
+    node.host().await
+}
 
-    // Open by default: typing a name is the whole point of an office relay
-    // that someone starts from a portable exe.
-    let mode = relay::model::OfficeMode::parse(mode.as_deref().unwrap_or("open"));
-    let name = name.unwrap_or_else(|| "Lokalen".to_string());
-    let started = relay::start(port.unwrap_or(8787), &portable::relay_dir(), mode, &name).await?;
-    let info = started.info.clone();
-    *hosted = Some(started);
-    Ok(info)
+/// Follows an office another computer is hosting.
+///
+/// The token is the person's own session there: replication hands this machine
+/// the whole office, so it has to be someone who is already in it.
+#[tauri::command]
+async fn join_office(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Office>,
+    url: String,
+    token: String,
+) -> Result<relay::cluster::Status, String> {
+    let node = office_node(&app, &state, None, None, None).await;
+    node.join(&url, &token).await?;
+    Ok(node.status())
+}
+
+/// Where the office is being served right now, and this machine's part in it.
+#[tauri::command]
+async fn cluster_status(
+    state: tauri::State<'_, Office>,
+) -> Result<Option<relay::cluster::Status>, String> {
+    Ok(state.0.lock().await.as_ref().map(|node| node.status()))
 }
 
 #[tauri::command]
-async fn stop_relay(state: tauri::State<'_, HostedRelay>) -> Result<(), String> {
-    let mut hosted = state.0.lock().await;
-    if let Some(relay) = hosted.take() {
-        relay.stop().await;
+async fn stop_relay(state: tauri::State<'_, Office>) -> Result<(), String> {
+    if let Some(node) = state.0.lock().await.as_ref() {
+        node.stand_down().await;
     }
     Ok(())
 }
 
 #[tauri::command]
 async fn relay_status(
-    state: tauri::State<'_, HostedRelay>,
+    state: tauri::State<'_, Office>,
 ) -> Result<Option<relay::RelayInfo>, String> {
-    Ok(state.0.lock().await.as_ref().map(|r| r.info.clone()))
+    Ok(state.0.lock().await.as_ref().and_then(|node| node.relay_info()))
 }
 
 /// Streams an attachment straight from the relay onto disk.
@@ -145,6 +197,152 @@ async fn discover_offices(timeout_ms: Option<u64>) -> Result<Vec<relay::discover
     Ok(relay::discovery::discover(window).await)
 }
 
+/// Writes the whole office - accounts, messages and attachments - to one file.
+///
+/// One file rather than a folder because a backup nobody can carry on a stick
+/// is a backup nobody takes.
+#[tauri::command]
+async fn export_office(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Office>,
+    path: String,
+) -> Result<relay::backup::Summary, String> {
+    let node = office_node(&app, &state, None, None, None).await;
+    node.export(std::path::Path::new(&path))
+}
+
+/// Replaces this machine's office with one from a backup file.
+#[tauri::command]
+async fn import_office(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Office>,
+    path: String,
+) -> Result<relay::backup::Summary, String> {
+    let node = office_node(&app, &state, None, None, None).await;
+    node.restore(std::path::Path::new(&path)).await
+}
+
+/* ------------------------------------------------------------------ */
+/* Living in the tray                                                  */
+/* ------------------------------------------------------------------ */
+
+/// Puts the unread count on the tray icon's tooltip.
+///
+/// The window spends most of its life hidden behind a journal system, so the
+/// tray is where anyone actually looks to see whether something is waiting.
+#[tauri::command]
+fn set_badge(app: tauri::AppHandle, unread: u32) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        let tooltip = match unread {
+            0 => "Lokalen".to_string(),
+            1 => "Lokalen - 1 oläst".to_string(),
+            n => format!("Lokalen - {n} olästa"),
+        };
+        if let Some(tray) = app.tray_by_id(TRAY_ID) {
+            tray.set_tooltip(Some(&tooltip)).map_err(|e| e.to_string())?;
+        }
+    }
+    #[cfg(not(desktop))]
+    let _ = (app, unread);
+    Ok(())
+}
+
+/// Starts the app when the person logs in.
+///
+/// Off by default and asked for explicitly: a clinic wants this on every
+/// machine, but deciding that for someone is not this app's business.
+#[tauri::command]
+fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    #[cfg(desktop)]
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        let manager = app.autolaunch();
+        if enabled {
+            manager.enable().map_err(|e| e.to_string())?;
+        } else {
+            manager.disable().map_err(|e| e.to_string())?;
+        }
+        return manager.is_enabled().map_err(|e| e.to_string());
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, enabled);
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+fn autostart_enabled(app: tauri::AppHandle) -> bool {
+    #[cfg(desktop)]
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        return app.autolaunch().is_enabled().unwrap_or(false);
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        false
+    }
+}
+
+#[cfg(desktop)]
+const TRAY_ID: &str = "lokalen";
+
+/// Builds the tray icon and its menu.
+///
+/// Closing the window hides it rather than quitting, because a messenger that
+/// is not running is a messenger nobody can reach - and the close button is
+/// how most people "put something away".
+#[cfg(desktop)]
+fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let show = MenuItemBuilder::with_id("show", "Visa Lokalen").build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "Avsluta").build(app)?;
+    let menu = MenuBuilder::new(app).items(&[&show]).separator().items(&[&quit]).build()?;
+
+    let mut tray = TrayIconBuilder::with_id(TRAY_ID)
+        .tooltip("Lokalen")
+        .menu(&menu)
+        // The menu belongs on right-click; a left click should just bring the
+        // window back, which is what everyone tries first.
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => reveal(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                reveal(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
+/// Brings the window back from the tray.
+#[cfg(desktop)]
+fn reveal(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 /// Where this run keeps its data, and whether that is beside the exe.
 #[tauri::command]
 fn storage_location() -> serde_json::Value {
@@ -156,8 +354,20 @@ fn storage_location() -> serde_json::Value {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .manage(HostedRelay::default())
+    let mut builder = tauri::Builder::default().manage(Office::default());
+
+    #[cfg(desktop)]
+    {
+        // Registered with no arguments: the app decides for itself whether to
+        // open a window on a login start, and starting minimised into the
+        // tray is the whole point.
+        builder = builder.plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ));
+    }
+
+    builder
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -165,13 +375,27 @@ pub fn run() {
             alert_window,
             focus_window,
             start_relay,
+            join_office,
+            cluster_status,
             stop_relay,
             relay_status,
             discover_offices,
             save_attachment,
-            storage_location
+            storage_location,
+            set_badge,
+            set_autostart,
+            autostart_enabled,
+            export_office,
+            import_office
         ])
         .setup(|app| {
+            #[cfg(desktop)]
+            // Best effort: a desktop with no system tray - some Linux
+            // sessions - should still get a working window.
+            if let Err(err) = build_tray(app.handle()) {
+                eprintln!("[tray] ingen ikon i aktivitetsfältet: {err}");
+            }
+
             // Vibrancy is only meaningful on desktop; on iOS the webview
             // already composites against the system background.
             #[cfg(target_os = "macos")]
@@ -192,6 +416,21 @@ pub fn run() {
             let _ = app;
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Closing puts the app in the tray instead of quitting. A
+            // messenger that is not running is a messenger nobody can reach,
+            // and the close button is how most people put something away.
+            #[cfg(desktop)]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                use tauri::Manager;
+                if window.app_handle().tray_by_id(TRAY_ID).is_some() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+            #[cfg(not(desktop))]
+            let _ = (window, event);
         })
         .run(tauri::generate_context!())
         .expect("fel vid körning av Lokalen");

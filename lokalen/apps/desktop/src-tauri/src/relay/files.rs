@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, OptionalExtension};
 
 use super::model::{chunk_count_for, now_ms, CHUNK_SIZE};
+use super::oplog;
 use super::store::Db;
+use crate::args;
 
 #[derive(Clone)]
 pub struct FileRow {
@@ -39,7 +41,7 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<FileRow> {
 
 /// File ids are server-generated UUIDs. Validating the shape keeps any
 /// caller-supplied value from reaching the filesystem as a path segment.
-fn blob_path(data_dir: &Path, file_id: &str) -> Option<PathBuf> {
+pub fn blob_path(data_dir: &Path, file_id: &str) -> Option<PathBuf> {
     let valid = file_id.len() == 36
         && file_id
             .chars()
@@ -86,10 +88,10 @@ pub fn init_upload(
 
     {
         let conn = db.lock().unwrap();
-        conn.execute(
-            "INSERT INTO files (id, owner_id, to_id, name, size, mime, chunk_count, complete, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
-            params![
+        oplog::write(
+            &conn,
+            &oplog::FILE_INSERT,
+            args![
                 file_id,
                 owner_id,
                 to,
@@ -164,10 +166,7 @@ pub fn write_chunk(
     let complete = received.len() as i64 == file.chunk_count;
     if complete {
         let conn = db.lock().unwrap();
-        let _ = conn.execute(
-            "UPDATE files SET complete = 1 WHERE id = ?",
-            params![file.id],
-        );
+        let _ = oplog::write(&conn, &oplog::FILE_COMPLETE, args![file.id]);
     }
 
     Ok(ChunkResult { complete, received })

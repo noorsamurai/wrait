@@ -14,6 +14,11 @@
     "core:window:allow-request-user-attention",
     "notification:default",
     "os:allow-platform",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled",
+    "core:event:default"
   ]
 }

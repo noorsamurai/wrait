@@ -5,11 +5,15 @@
 //! launch and nothing left behind on exit. SQLite is compiled in, and the
 //! whole relay is a task on the app's own tokio runtime.
 
+pub mod backup;
+pub mod cluster;
 pub mod discovery;
 pub mod files;
 pub mod hub;
 pub mod model;
+pub mod oplog;
 pub mod routes;
+pub mod replica;
 pub mod store;
 
 use std::net::{Ipv4Addr, SocketAddr};
@@ -19,6 +23,7 @@ use std::sync::Arc;
 use hub::Hub;
 use model::OfficeMode;
 use routes::AppState;
+use store::Db;
 
 /// What a caller needs to tell everyone else in the office.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -35,6 +40,10 @@ pub struct RelayInfo {
 
 pub struct Relay {
     pub info: RelayInfo,
+    /// The office as this machine holds it. Shared with the standby machinery
+    /// so hosting and replicating are two roles over one database, not two
+    /// databases.
+    pub db: Db,
     shutdown: tokio::sync::oneshot::Sender<()>,
     handle: tokio::task::JoinHandle<()>,
     beacon: Option<discovery::Beacon>,
@@ -76,14 +85,31 @@ pub async fn start(
     office_name: &str,
 ) -> Result<Relay, String> {
     let db = store::open(Some(&data_dir.join("lokalen.db"))).map_err(|e| e.to_string())?;
+    start_with(db, port, data_dir, mode, office_name, 1).await
+}
+
+/// Starts serving an office this machine already holds.
+///
+/// Taking the database as an argument is what lets a standby be promoted: it
+/// has been following the office all along, and hosting is then only a matter
+/// of binding a port to the copy it already has.
+pub async fn start_with(
+    db: Db,
+    port: u16,
+    data_dir: &Path,
+    mode: OfficeMode,
+    office_name: &str,
+    term: i64,
+) -> Result<Relay, String> {
     store::init_office(&db, mode, office_name);
     // Every office starts with its rooms and the Alla channel present.
     store::seed_rooms(&db);
     let office = store::office_info(&db);
     let state = AppState {
-        db,
+        db: db.clone(),
         hub: Hub::new(),
         data_dir: Arc::new(PathBuf::from(data_dir)),
+        term: Arc::new(std::sync::atomic::AtomicI64::new(term)),
     };
 
     let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)))
@@ -113,7 +139,11 @@ pub async fn start(
 
     // Announcing is a convenience: if the discovery port is unavailable the
     // relay still serves, people just have to type the address.
-    let beacon = discovery::announce(bound, uuid::Uuid::new_v4().to_string());
+    let beacon = discovery::announce(discovery::Advert {
+        port: bound,
+        office: store::office_id(&db),
+        term,
+    });
 
     Ok(Relay {
         info: RelayInfo {
@@ -122,6 +152,7 @@ pub async fn start(
             mode: office.mode.as_str().to_string(),
             addresses: lan_addresses(bound),
         },
+        db,
         shutdown,
         handle,
         beacon,

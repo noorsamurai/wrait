@@ -8,7 +8,11 @@ use lokalen_lib::relay::discovery;
 /// Doing it in sequence also proves that stopping actually stops.
 #[tokio::test]
 async fn an_office_is_discoverable_while_hosted_and_not_after() {
-    let Some(beacon) = discovery::announce(8787, "test-office".into()) else {
+    let Some(beacon) = discovery::announce(discovery::Advert {
+        port: 8787,
+        office: "test-office".into(),
+        term: 1,
+    }) else {
         // A sandbox with no multicast- or broadcast-capable interface cannot
         // exercise this; skip rather than fail on network policy.
         eprintln!("skipped: could not bind the discovery port");
@@ -27,6 +31,7 @@ async fn an_office_is_discoverable_while_hosted_and_not_after() {
         office.url
     );
     assert!(!office.name.is_empty(), "the host machine should be named");
+    assert_eq!(office.term, 1, "the round of hosting travels with the beacon");
     assert!(
         office.url.starts_with("http://"),
         "the url should paste straight into the server field: {}",

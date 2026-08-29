@@ -19,6 +19,7 @@ use tower_http::cors::{Any, CorsLayer};
 use super::files;
 use super::hub::Hub;
 use super::model::*;
+use super::oplog;
 use super::store::{self, Db};
 
 const MAX_BODY_LENGTH: usize = 8000;
@@ -26,12 +27,18 @@ const HISTORY_LIMIT: i64 = 500;
 const TASK_LIMIT: i64 = 500;
 const PAGE_LIMIT: i64 = 200;
 const SEARCH_LIMIT: i64 = 60;
+/// Entries a standby is given at a time. Enough to catch up quickly, small
+/// enough that one response is never a surprise on a slow office network.
+const REPLICA_BATCH: i64 = 500;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: Db,
     pub hub: Hub,
     pub data_dir: Arc<PathBuf>,
+    /// Which round of hosting this is. Standby machines compare it with their
+    /// own to notice that the office has moved on without them.
+    pub term: Arc<std::sync::atomic::AtomicI64>,
 }
 
 fn fail(status: StatusCode, code: &str, message: &str) -> Response {
@@ -75,6 +82,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/files/init", post(file_init))
         .route("/api/files/{id}/chunk", put(file_chunk))
         .route("/api/files/{id}", get(file_download))
+        // Replication. Everything under here hands one machine the whole
+        // office, which is what lets another computer take over when this one
+        // is switched off - and is why an office on an untrusted network
+        // should be created in the passworded mode.
+        .route("/api/replica/info", get(replica_info))
+        .route("/api/replica/ops", get(replica_ops))
+        .route("/api/replica/snapshot", get(replica_snapshot))
+        .route("/api/replica/blob/{id}", get(replica_blob))
         .route("/ws", get(ws_upgrade))
         .layer(cors)
         .with_state(state)
@@ -86,6 +101,141 @@ pub fn router(state: AppState) -> Router {
 
 async fn health(State(state): State<AppState>) -> Response {
     Json(json!({ "ok": true, "users": state.hub.online_count() })).into_response()
+}
+
+/* ------------------------------------------------------------------ */
+/* Replication                                                         */
+/* ------------------------------------------------------------------ */
+
+#[derive(Deserialize)]
+struct OpsQuery {
+    since: Option<i64>,
+    /// How long the host may hold the request open waiting for something to
+    /// happen. Long-polling keeps replication prompt without a standby
+    /// hammering the host between messages.
+    wait: Option<u64>,
+}
+
+fn office_id(state: &AppState) -> String {
+    store::get_setting(&state.db, "office_id").unwrap_or_default()
+}
+
+fn current_term(state: &AppState) -> i64 {
+    state.term.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+async fn replica_info(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(denied) = require_user(&state, &headers) {
+        return denied;
+    }
+    let seq = oplog::watermark(&state.db.lock().unwrap());
+    Json(json!({
+        "office": office_id(&state),
+        "term": current_term(&state),
+        "seq": seq,
+    }))
+    .into_response()
+}
+
+async fn replica_ops(
+    State(state): State<AppState>,
+    Query(query): Query<OpsQuery>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(denied) = require_user(&state, &headers) {
+        return denied;
+    }
+    let since = query.since.unwrap_or(0);
+    let wait = std::time::Duration::from_millis(query.wait.unwrap_or(0).min(25_000));
+    let deadline = tokio::time::Instant::now() + wait;
+
+    loop {
+        let (entries, watermark) = {
+            let conn = state.db.lock().unwrap();
+            (oplog::since(&conn, since, REPLICA_BATCH), oplog::watermark(&conn))
+        };
+        // The standby holds more of the log than this machine does. That is
+        // not a standby being ahead of a live host - it means the host's
+        // history was replaced, by a restore from a backup, and the two are
+        // no longer the same story. Only a fresh copy can settle it.
+        if since > watermark {
+            return Json(json!({ "term": current_term(&state), "entries": [], "reset": true }))
+                .into_response();
+        }
+        if !entries.is_empty() || tokio::time::Instant::now() >= deadline {
+            return Json(json!({ "term": current_term(&state), "entries": entries }))
+                .into_response();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+}
+
+/// A consistent copy of the whole database, for a machine joining the office
+/// or one whose log has fallen too far behind to catch up entry by entry.
+async fn replica_snapshot(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(denied) = require_user(&state, &headers) {
+        return denied;
+    }
+
+    let target = state
+        .data_dir
+        .join(format!("snapshot-{}.db", uuid::Uuid::new_v4()));
+    let seq = {
+        let conn = state.db.lock().unwrap();
+        // VACUUM INTO takes the copy inside a read transaction, so it is a
+        // point in time rather than a file read out from under live writes.
+        if let Err(err) = conn.execute("VACUUM INTO ?", rusqlite::params![target.to_string_lossy()])
+        {
+            return fail(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "snapshot_failed",
+                &format!("Kunde inte kopiera databasen: {err}"),
+            );
+        }
+        oplog::watermark(&conn)
+    };
+
+    let bytes = std::fs::read(&target);
+    let _ = std::fs::remove_file(&target);
+    match bytes {
+        Err(err) => fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "snapshot_failed",
+            &err.to_string(),
+        ),
+        Ok(bytes) => Response::builder()
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .header(header::CONTENT_LENGTH, bytes.len())
+            .header("x-lokalen-seq", seq.to_string())
+            .body(Body::from(bytes))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+    }
+}
+
+/// An attachment, for a standby holding a message that refers to it.
+///
+/// Unlike the ordinary download this is not restricted to the two people in
+/// the conversation: a standby has to be able to serve the file after it takes
+/// over, so it needs the bytes for every conversation in the office.
+async fn replica_blob(
+    State(state): State<AppState>,
+    Path(file_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(denied) = require_user(&state, &headers) {
+        return denied;
+    }
+    let Some(file) = files::get(&state.db, &file_id) else {
+        return fail(StatusCode::NOT_FOUND, "not_found", "Filen finns inte längre.");
+    };
+    match files::read_blob(&state.data_dir, &file) {
+        Err(_) => fail(StatusCode::NOT_FOUND, "not_found", "Filen finns inte längre."),
+        Ok(bytes) => Response::builder()
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .header(header::CONTENT_LENGTH, bytes.len())
+            .body(Body::from(bytes))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+    }
 }
 
 async fn register(State(state): State<AppState>, body: String) -> Response {

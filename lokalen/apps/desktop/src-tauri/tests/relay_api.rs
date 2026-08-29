@@ -62,6 +62,7 @@ impl Harness {
                 db,
                 hub: Hub::new(),
                 data_dir: std::sync::Arc::new(dir.path().to_path_buf()),
+                term: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(1)),
             },
             _dir: dir,
         }

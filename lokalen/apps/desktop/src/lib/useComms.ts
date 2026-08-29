@@ -5,7 +5,7 @@ import type {
 import { Realtime, byConversation, conversationOf, type Session } from "./client";
 import { notify, requestAttention, requestNotificationAccess } from "./native";
 import { htmlToPlain } from "./richtext";
-import { playAlertTone, playMessageTone, playNudgeTone } from "./sound";
+import { playMessageTone, playUrgentTone } from "./sound";
 import type { Settings } from "./settings";
 
 interface State {
@@ -270,7 +270,7 @@ export function useComms(session: Session | null, settings: Settings) {
     const audible = current.sound && !current.muted && !mutedByStatusRef.current;
 
     if (event.t === "nudge") {
-      if (audible) playNudgeTone(current.volume);
+      if (audible) playUrgentTone(current.volume);
       const from = stateRef.current.users.find((u) => u.id === event.from);
       setNudgedBy(event.from);
       setTimeout(() => setNudgedBy(null), 4000);
@@ -300,7 +300,7 @@ export function useComms(session: Session | null, settings: Settings) {
     if (message.from === stateRef.current.self?.id) return;
 
     if (audible) {
-      if (message.alert) playAlertTone(current.volume);
+      if (message.alert) playUrgentTone(current.volume);
       else playMessageTone(current.volume);
     }
 

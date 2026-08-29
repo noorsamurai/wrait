@@ -15,8 +15,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-os = "2"
 serde = { version = "1", features = ["derive"] }
@@ -35,7 +36,12 @@ tower-http = { version = "0.7.0", features = ["cors"] }
 tokio-util = { version = "0.7.19", features = ["io"] }
 socket2 = "0.6.5"
 gethostname = "1.1.0"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "charset", "http2"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "charset", "http2", "json"] }
+
+[target.'cfg(windows)'.dependencies]
+# Lets the same exe register itself with the Windows service manager, so an
+# always-on office machine keeps serving with nobody logged in.
+windows-service = "0.8"
 
 [profile.release]
 # Small binary and low resident memory matter more here than raw speed: the
