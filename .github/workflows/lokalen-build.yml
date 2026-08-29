@@ -166,7 +166,6 @@ jobs:
     # trusts it, neither of which belongs in CI. What CI can do is prove the
     # project generates and the app compiles for iOS, and hand over the Xcode
     # project to open on a Mac.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -191,6 +190,8 @@ jobs:
 
       # For the simulator, which needs no signing identity. A device build is
       # the same code with a team id attached, which only the owner has.
+      # The release configuration on purpose: Tauri's debug build phase expects
+      # the dev server that `tauri ios dev` runs, and there is none here.
       - name: Compile for the simulator
         run: |
           pnpm build
@@ -201,10 +202,13 @@ jobs:
             -scheme "$scheme" \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
-            -configuration debug \
+            -configuration release \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
+      # Published even when the compile fails: the project is the deliverable,
+      # and it is more use in hand than described in a log.
       - name: Upload the Xcode project
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: lokalen-ios-xcode
