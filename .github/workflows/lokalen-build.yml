@@ -190,20 +190,15 @@ jobs:
 
       # For the simulator, which needs no signing identity. A device build is
       # the same code with a team id attached, which only the owner has.
-      # The release configuration on purpose: Tauri's debug build phase expects
-      # the dev server that `tauri ios dev` runs, and there is none here.
-      - name: Compile for the simulator
-        run: |
-          pnpm build
-          project=$(ls -d apps/desktop/src-tauri/gen/apple/*.xcodeproj | head -1)
-          scheme=$(basename "$project" .xcodeproj)_iOS
-          xcodebuild build \
-            -project "$project" \
-            -scheme "$scheme" \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            -configuration release \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+      # The library, for a real iPhone. This is the part ordinary work here can
+      # break - a dependency that does not build for iOS, or a call behind the
+      # wrong cfg - and it needs neither Xcode's build phase nor a signing
+      # identity. Driving xcodebuild directly does not work: Tauri's build
+      # phase calls back into `tauri ios xcode-script`, which expects the dev
+      # server that only `tauri ios dev` starts.
+      - name: Compile the app for iOS
+        working-directory: lokalen/apps/desktop/src-tauri
+        run: cargo build --target aarch64-apple-ios --lib
 
       # Published even when the compile fails: the project is the deliverable,
       # and it is more use in hand than described in a log.
